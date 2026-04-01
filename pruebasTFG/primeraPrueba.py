@@ -6,14 +6,15 @@ import matplotlib.pyplot as plt
 
 # =========================
 # ORÁCULO GENERAL
-# solution se da como string tipo "1011"
-# interpretado como |q_{n-1} ... q_0>
+# Marcamos la solucion con fase negativa
 # =========================
 def oracle(qc, solution):
     n = len(solution)
 
-    # Qiskit: q0 es el bit menos significativo.
-    # Por eso recorremos solution al revés.
+    # Si tenemos 1011 nosotros interpretamos como q0, q1, q2, q3 pero qiskit lo interpreta al revés, esto sucede porque en informatica clasica, los numeros binarios se interpretan
+    # de esa forma, siendo el bit de la derecha el menos significativo, por eso Qiskit lo interpreta al revés.
+    # Para ello usamos el 'reserved' para invertir el orden de los bits, así el bit de la derecha (menos significativo) se corresponde con el qubit 0, y el bit de la izquierda (más significativo) se corresponde con el qubit n-1.
+    # Tras esto recorremos bit a bit y cambiamos 0 por 1, para luego modificar la fase del estado objetivo.
     for i, bit in enumerate(reversed(solution)):
         if bit == '0':
             qc.x(i)
