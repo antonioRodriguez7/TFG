@@ -80,77 +80,68 @@ def build_grover_basis(n, solution_index):
 def project_state(statevector, solution_index, n):
     # Sacamos amplitudes
     amps = statevector.data
+    print("Aplitudes:", amps)
     # Construimos los vectores
     ket_r, ket_t = build_grover_basis(n, solution_index)
 
-    # Calculamos c_r y c_t que es simplemente multiplicando nuestros vectores por las amplitudes
+    # coeficientes en la base {|r>, |t>}
     c_r = np.vdot(ket_r, amps)
     c_t = np.vdot(ket_t, amps)
 
-    # Primero comprobamos que c_r no es prácticamente cero, para evitar problemas de división por cero al calcular la fase. Si c_r es muy pequeño, no aplicamos corrección de fase.
+    # fijar fase global para que c_r sea real positivo
     if abs(c_r) > 1e-12:
-        # Creamos un numero que corrige ese angulo, por ejemplo si c_r = -0.866 entonces phase = -1
         phase = np.exp(-1j * np.angle(c_r))
-        # Multiplicamos y si antes teniamos que c_r = -0.866, ahora c_r = -0.866 * (-1) = 0.866, es decir, ahora c_r es real positivo, y lo mismo para c_t, si antes teniamos c_t = 0.5 + 0.5j, ahora c_t = (0.5 + 0.5j) * (-1) = -0.5 - 0.5j, es decir, hemos corregido la fase global de nuestro estado para que c_r sea real positivo.
         c_r *= phase
         c_t *= phase
+    print(f"Después de corrección de fase: c_r = {c_r.real}, c_t = {c_t.real}")
     return c_r.real, c_t.real
 
-###########################
+
+# =========================
 # ITERACIONES ÓPTIMAS
-###########################
+# =========================
 def optimal_iterations(n):
     N = 2**n
     return int(np.floor((np.pi / 4) * np.sqrt(N)))
 
 
-###########################
+# =========================
 # ANALIZAR GROVER
-# Este metodo contruye la evolucion de Grover paso a paso y guarda el estado después de cada paso
-###########################
+# =========================
 def analyze_grover(n, solution, iterations):
     qc = QuantumCircuit(n)
-    # Lista que ira almacenando los estados después de cada paso
     states = []
-    # Lista que ira almacenando las etiquetas para cada estado, por ejemplo "oracle_1", "diffuser_1", etc.
     labels = []
 
-    # Al principio guardamos el estado inicial, que es |0>
     states.append(get_state(qc))
     labels.append("init")
-    # Aplicamos Hadamard a todos los qubits para crear la superposición uniforme |s⟩
+
     qc.h(range(n))
     states.append(get_state(qc))
     labels.append("|s⟩")
 
     for i in range(iterations):
-        # Marcamos solucion
         oracle(qc, solution)
         states.append(get_state(qc))
         labels.append(f"oracle_{i+1}")
-        # Applicamos el difusor para amplificar la solucion
+
         diffuser(qc, n)
         states.append(get_state(qc))
         labels.append(f"diffuser_{i+1}")
-        
-    for i in range(iterations):
-        print("Estados:", states[i])
-        
+
     return states, labels
 
-###########################
+
+# =========================
 # VISUALIZACIÓN MEJORADA
-###########################
+# =========================
 def plot_grover(states, labels, n, solution):
-    # Convertimos binario a numero
     solution_index = int(solution, 2)
-    # Convertimos en puntos todos los estados
     points = [project_state(s, solution_index, n) for s in states]
-    # Extraemos las componentes x e y de cada punto para graficar la trayectoria
+
     xs = [p[0] for p in points]
     ys = [p[1] for p in points]
 
-    # Creamos la figura
     plt.figure(figsize=(9, 7))
 
     # Ejes
@@ -176,7 +167,7 @@ def plot_grover(states, labels, n, solution):
             color = "blue"
         elif label == "|s⟩":
             color = "green"
-        # Dibujamos la flecha
+
         plt.quiver(
             0, 0, x, y,
             color=color,
@@ -185,7 +176,7 @@ def plot_grover(states, labels, n, solution):
             width=0.006,
             alpha=0.85
         )
-        # Añadimos la etiqueta al lado de la flecha
+
         plt.text(x + 0.04, y + 0.04, label, fontsize=9)
 
     # Trayectoria
