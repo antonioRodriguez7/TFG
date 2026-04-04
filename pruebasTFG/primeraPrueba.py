@@ -80,6 +80,7 @@ def build_grover_basis(n, solution_index):
 def project_state(statevector, solution_index, n):
     # Sacamos amplitudes
     amps = statevector.data
+    print("Aplitudes:", amps)
     # Construimos los vectores
     ket_r, ket_t = build_grover_basis(n, solution_index)
 
@@ -127,14 +128,16 @@ def analyze_grover(n, solution, iterations):
         # Marcamos solucion
         oracle(qc, solution)
         states.append(get_state(qc))
-        labels.append(f"oracle_{i+1}")
+        labels.append(rf"$O_{{{i+1}}}$")
         # Applicamos el difusor para amplificar la solucion
         diffuser(qc, n)
         states.append(get_state(qc))
-        labels.append(f"diffuser_{i+1}")
-        
-    for i in range(iterations):
+        labels.append(rf"$D_{{{i+1}}}$")
+
+    for i in range(len(states)):
         print("Estados:", states[i])
+
+    print(qc.draw())
         
     return states, labels
 
@@ -145,10 +148,18 @@ def plot_grover(states, labels, n, solution):
     # Convertimos binario a numero
     solution_index = int(solution, 2)
     # Convertimos en puntos todos los estados
-    points = [project_state(s, solution_index, n) for s in states]
+    points = []
+
+    for s in states:
+        punto = project_state(s, solution_index, n)
+        points.append(punto)    
     # Extraemos las componentes x e y de cada punto para graficar la trayectoria
-    xs = [p[0] for p in points]
-    ys = [p[1] for p in points]
+    xs = []
+    ys = []
+
+    for p in points:
+        xs.append(p[0])
+        ys.append(p[1])
 
     # Creamos la figura
     plt.figure(figsize=(9, 7))
@@ -170,9 +181,9 @@ def plot_grover(states, labels, n, solution):
     for (x, y), label in zip(points, labels):
         color = "black"
 
-        if "oracle" in label:
+        if "O" in label:
             color = "red"
-        elif "diffuser" in label:
+        elif "D" in label:
             color = "blue"
         elif label == "|s⟩":
             color = "green"
