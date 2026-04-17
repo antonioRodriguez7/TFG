@@ -521,7 +521,7 @@ def main():
         M = compute_M(choice, number, n)
         N = 2**n
 
-        # FILTRO → SOLO casos buenos
+        
         if 1 <= M <= N // 4:
             break
 
