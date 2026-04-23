@@ -1,94 +1,203 @@
 from qiskit import QuantumCircuit
 from qiskit.quantum_info import Statevector
+from qiskit.circuit.library import MCXGate
+from qiskit.qasm2 import loads, LEGACY_CUSTOM_INSTRUCTIONS
+
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from qiskit.circuit.library import MCXGate
-import random
+import tkinter as tk
+from tkinter import filedialog, simpledialog, messagebox
+
+import math
+import json
+import os
+import sys
+import subprocess
 
 # =========================
-# ORACULOS
+# CONFIGURACION
+# =========================
+
+GENERAR_GRAFICAS = True
+GENERAR_VIDEO_MANIM = True
+
+MANIM_QUALITY = "-pql"   # -pql, -pqm, -pqh
+MANIM_DATA_FILE = "grover_manim_data.json"
+
+try:
+    from manim import *
+    MANIM_AVAILABLE = True
+except ImportError:
+    MANIM_AVAILABLE = False
+
+
+# =========================
+# ESCENA MANIM
+# =========================
+
+if MANIM_AVAILABLE:
+    class GroverScene(Scene):
+        def construct(self):
+            if not os.path.exists(MANIM_DATA_FILE):
+                raise FileNotFoundError(f"No existe {MANIM_DATA_FILE}")
+
+            with open(MANIM_DATA_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            points = data["points"]
+            labels = data["labels"]
+            title_text = data["title"]
+            iterations = data["iterations"]
+
+            plane = NumberPlane(
+                x_range=[-1.2, 1.2, 0.5],
+                y_range=[-1.2, 1.2, 0.5],
+                x_length=8,
+                y_length=8,
+                background_line_style={"stroke_opacity": 0.25}
+            )
+
+            origin = plane.c2p(0, 0)
+
+            title = Text(title_text, font_size=28).to_edge(UP)
+            self.play(Write(title))
+            self.play(Create(plane))
+
+            eje_r = Arrow(origin, plane.c2p(1, 0), buff=0, color=WHITE)
+            eje_t = Arrow(origin, plane.c2p(0, 1), buff=0, color=WHITE)
+
+            label_r = Text("|r>", font_size=24).next_to(plane.c2p(1, 0), RIGHT, buff=0.12)
+            label_t = Text("|t>", font_size=24).next_to(plane.c2p(0, 1), UP, buff=0.12)
+
+            self.play(Create(eje_r), Create(eje_t), Write(label_r), Write(label_t))
+
+            legend_1 = Text("Verde: estado de partida", font_size=20).to_corner(UL).shift(DOWN * 0.8)
+            legend_2 = Text("Rojo: oraculo", font_size=20).next_to(legend_1, DOWN, aligned_edge=LEFT)
+            legend_3 = Text("Azul: difusor", font_size=20).next_to(legend_2, DOWN, aligned_edge=LEFT)
+
+            self.play(Write(legend_1), Write(legend_2), Write(legend_3))
+
+            current_group = None
+            current_iter_text = None
+
+            for i in range(1, iterations + 1):
+                start_idx = 1 if i == 1 else 2 * i - 1
+                oracle_idx = 2 * i
+                diffuser_idx = 2 * i + 1
+
+                start_x, start_y = points[start_idx]
+                oracle_x, oracle_y = points[oracle_idx]
+                diff_x, diff_y = points[diffuser_idx]
+
+                start_label = labels[start_idx]
+                oracle_label = labels[oracle_idx]
+                diff_label = labels[diffuser_idx]
+
+                start_p = plane.c2p(start_x, start_y)
+                oracle_p = plane.c2p(oracle_x, oracle_y)
+                diff_p = plane.c2p(diff_x, diff_y)
+
+                start_arrow = Arrow(origin, start_p, buff=0, color=GREEN, stroke_width=6)
+                oracle_arrow = Arrow(origin, oracle_p, buff=0, color=RED, stroke_width=6)
+                diff_arrow = Arrow(origin, diff_p, buff=0, color=BLUE, stroke_width=6)
+
+                start_dot = Dot(start_p, color=GREEN, radius=0.05)
+                oracle_dot = Dot(oracle_p, color=RED, radius=0.05)
+                diff_dot = Dot(diff_p, color=BLUE, radius=0.05)
+
+                start_text = Text(start_label, font_size=20).next_to(start_p, UR, buff=0.08)
+                oracle_text = Text(oracle_label, font_size=20).next_to(oracle_p, UR, buff=0.08)
+                diff_text = Text(diff_label, font_size=20).next_to(diff_p, UR, buff=0.08)
+
+                seg_oracle = DashedLine(start_p, oracle_p, color=RED)
+                seg_diff = DashedLine(oracle_p, diff_p, color=BLUE)
+
+                iter_text = Text(f"Iteracion {i}", font_size=24).to_edge(DOWN)
+
+                group = VGroup(
+                    start_arrow, start_dot, start_text,
+                    oracle_arrow, oracle_dot, oracle_text,
+                    diff_arrow, diff_dot, diff_text,
+                    seg_oracle, seg_diff
+                )
+
+                if current_group is not None:
+                    self.play(FadeOut(current_group), FadeOut(current_iter_text), run_time=0.5)
+
+                self.play(FadeIn(iter_text), run_time=0.3)
+                self.play(Create(start_arrow), FadeIn(start_dot), Write(start_text), run_time=0.8)
+                self.wait(0.35)
+                self.play(Create(oracle_arrow), FadeIn(oracle_dot), Write(oracle_text), Create(seg_oracle), run_time=0.8)
+                self.wait(0.35)
+                self.play(Create(diff_arrow), FadeIn(diff_dot), Write(diff_text), Create(seg_diff), run_time=0.8)
+                self.wait(1.0)
+
+                current_group = group
+                current_iter_text = iter_text
+
+            self.wait(2)
+
+
+# =========================
+# ORACULOS REALES
 # =========================
 
 def mark_one(number, nqubits, name=None):
-
     if isinstance(number, str):
         binary = number.zfill(nqubits)
     else:
         binary = format(number, f"0{nqubits}b")
 
-    if name:
-        circuit = QuantumCircuit(nqubits, name=name)
-    else:
-        circuit = QuantumCircuit(nqubits, name=f"== {number}")
+    circuit = QuantumCircuit(nqubits, name=name if name else f"== {number}")
 
-    # Preparación
     for i, bit in enumerate(reversed(binary)):
         if bit == '0':
             circuit.x(i)
 
-    # Fase
     circuit.h(nqubits - 1)
-    circuit.mcx(list(range(nqubits - 1)), nqubits - 1)
+    circuit.append(MCXGate(nqubits - 1), list(range(nqubits)))
     circuit.h(nqubits - 1)
 
-    # Deshacer
     for i, bit in enumerate(reversed(binary)):
         if bit == '0':
             circuit.x(i)
 
     return circuit
 
-# =========================
-# ORACULO MAYOR QUE
-# =========================
 
-def oracle_greater(number, nqubits, name=None):
+def to_binary(number: int, nbits: int | None = None) -> str:
+    binary = bin(number)[2:]
+    if nbits is None:
+        return binary
+    if nbits < len(binary):
+        raise ValueError(f"nbits must be >= {len(binary)}")
+    return binary.zfill(nbits)
 
-    if isinstance(number, str):
-        number = int(number, 2)
 
-    if name:
-        circuit = QuantumCircuit(nqubits, name=name)
-    else:
-        circuit = QuantumCircuit(nqubits, name=f"> {number}")
-
-    if number < (2**nqubits):
-        number = number + 1
-
-    less_than = oracle_less(number, nqubits)
-
-    circuit.append(less_than.to_gate(), list(range(nqubits)))
-
-    circuit.global_phase += np.pi
-
+def multi_control_z(nqubits: int) -> QuantumCircuit:
+    circuit = QuantumCircuit(nqubits, name=f"MCZ({nqubits})")
+    circuit.h(nqubits - 1)
+    circuit.append(MCXGate(nqubits - 1), range(nqubits))
+    circuit.h(nqubits - 1)
     return circuit
-# =========================
-# ORACULO MENOR QUE
-# =========================
-def oracle_less(number:int, nqubits:int, name=None):
 
-    if name:
-        circuit = QuantumCircuit(nqubits, name=name)
-    else:
-        circuit = QuantumCircuit(nqubits, name=f"< {number}")
 
-    num_binary = to_binary(number, nqubits)
+def oracle_less(number: int, nqubits: int, name=None):
+    circuit = QuantumCircuit(nqubits, name=name if name else f"< {number}")
     num_binary = to_binary(number, nqubits)
 
     if num_binary[0] == "1":
-        circuit.x(nqubits-1)
-        circuit.z(nqubits-1)
-        circuit.x(nqubits-1)
+        circuit.x(nqubits - 1)
+        circuit.z(nqubits - 1)
+        circuit.x(nqubits - 1)
     else:
-        circuit.x(nqubits-1)
+        circuit.x(nqubits - 1)
 
     for position1, value in enumerate(num_binary[1:]):
         position = position1 + 1
 
         if value == '0':
             circuit.x(nqubits - position - 1)
-
         else:
             circuit.x(nqubits - position - 1)
 
@@ -107,435 +216,494 @@ def oracle_less(number:int, nqubits:int, name=None):
     return circuit
 
 
-def to_binary(number:int, nbits: int | None = None) -> str:
-    # Convertir el número a binario y eliminar el prefijo '0b'
-    binary = bin(number)[2:]  
+def oracle_greater(number, nqubits, name=None):
+    if isinstance(number, str):
+        number = int(number, 2)
 
-    # Sin nbits devuelve el binario "natural"
-    if nbits is None:
-        return binary
-    
-    if nbits < len(binary):
-        raise ValueError(f"nbits must be >= {len(binary)} ")
-    
-    return binary.zfill(nbits)  # Rellenar con ceros a la izquierda para alcanzar nbits
+    circuit = QuantumCircuit(nqubits, name=name if name else f"> {number}")
 
+    if number < (2**nqubits):
+        number = number + 1
 
-def multi_control_z(nqubits:int) -> QuantumCircuit:
-
-    '''
-    Function to create a multi-controlled Z gate.
-
-    Input:
-    nqubits: Integer (int) of the number of qubits in the gate (controls and target)
-        This means that the gate has nqubits-1 controls and 1 target.
-
-    Output:
-    circuit: QuantumCircuit containing a multi-controlled Z gate.
-        It has to be transformed with method .to_gate() to append to a QuantumCircuit larger.
-
-    Example:
-
-    main_circuit = QuantumCircuit(nqubits)
-
-    gate_multi_z = multi_control_z(nqubits)
-
-    main_circuit.append(gate_multi_z.to_gate(), range(nqubits))
-
-    '''
-
-    # Crea un circuito con nqubits y le asigna un nombre que indica que es una puerta MCZ con nqubits
-    circuit = QuantumCircuit(nqubits, name = f"MCZ({nqubits})")
-
-    # Aplica una puerta Hadamard al último qubit para preparar el estado de control
-    circuit.h(nqubits-1)
-    # Esto convertira todos los qubits en controles menos el ultimo que sera el target
-    # El objetivo es que si todos los qubits de control son 1, aplicamos NOT al ultimo qubit, lo que equivale a aplicar una puerta Z al estado |1> del ultimo qubit
-    circuit.append(MCXGate(nqubits - 1), range (nqubits))
-    # Deshacemos cambios en el ultimo qubit para volver a su estado original
-    circuit.h(nqubits-1)
-
-    # CAMBIA LA FASE DEL ESTADO OBJETIVO
+    less_than = oracle_less(number, nqubits)
+    circuit.append(less_than.to_gate(), list(range(nqubits)))
+    circuit.global_phase += np.pi
 
     return circuit
 
 
+# =========================
+# DIFUSOR
+# =========================
 
-
-
-
-
-
-
-###########################
-# ORÁCULO GENERAL
-# Marcamos la solucion con fase negativa
-###########################
-def oracle(qc, solution):
-    n = len(solution)
-    # Si tenemos 1011 nosotros interpretamos como q0, q1, q2, q3 pero qiskit lo interpreta al revés, esto sucede porque en informatica clasica, los numeros binarios se interpretan
-    # de esa forma, siendo el bit de la derecha el menos significativo, por eso Qiskit lo interpreta al revés.
-    # Para ello usamos el 'reserved' para invertir el orden de los bits, así el bit de la derecha (menos significativo) se corresponde con el qubit 0, y el bit de la izquierda (más significativo) se corresponde con el qubit n-1.
-    # Tras esto recorremos bit a bit y cambiamos 0 por 1, para luego modificar la fase del estado objetivo.
-    for i, bit in enumerate(reversed(solution)):
-        if bit == '0':
-            qc.x(i)
-    # Al aplicar H convertimos |1> en |->, ya que  convertimos: |+> = (|0> + |1>) y |-> = (|0> - |1>)
-    qc.h(n - 1)
-    # Aplicamos MCX, que en Qiskit significa: “Si TODOS los qubits de control están a 1 → aplica una X al qubit objetivo”
-    # El list(range(n - 1)): genera una lista para los qubits de control, si tenemos 5 qubits genera [0, 1, 2, y 3]
-    # El n - 1: es el qubit objetivo, en este caso el qubit 4 (el más significativo)
-    # Esto quiere decir: “Si los qubits 0,1,2,3 están TODOS en 1 → aplica una X al qubit 4”
-    # Con mode="noancilla" le decimos a Qiskit que no use qubits auxiliares para implementar el MCX, lo cual es posible si el número de qubits de control es menor o igual a 4.
-    qc.mcx(list(range(n - 1)), n - 1, mode="noancilla")
-    # Volvemos a aplicar H para convertir |-> de nuevo en |1>, pero ya con la fase negativa aplicada al estado objetivo.
-    qc.h(n - 1)
-    # Vueve al estado original pero con la fase negativa aplicada al estado objetivo, por eso volvemos a recorrer los bits y cambiamos 0 por 1.
-    for i, bit in enumerate(reversed(solution)):
-        if bit == '0':
-            qc.x(i)
-
-###########################
-# DIFUSOR GENERAL
-# #########################
 def diffuser(qc, n):
     qc.h(range(n))
     qc.x(range(n))
 
     qc.h(n - 1)
-    qc.mcx(list(range(n - 1)), n - 1, mode="noancilla")
+    qc.append(MCXGate(n - 1), list(range(n)))
     qc.h(n - 1)
 
     qc.x(range(n))
     qc.h(range(n))
 
-###########################
-# EXTRAER ESTADO
-###########################
+
+# =========================
+# ESTADO
+# =========================
+
 def get_state(qc):
     return Statevector.from_instruction(qc)
 
-###########################
-# BASE DEL PLANO DE GROVER
-# |t> = superposición uniforme de las soluciones
-# |r> = superposición uniforme de las no-soluciones
-# Esto nos permite reducir el problema de muchas dimensiones a solo 2
-###########################
+
+# =========================
+# BASE DE GROVER
+# =========================
+
 def build_grover_basis(n, solution_indices):
-    # Calculamos el número total de estados posibles con n qubits, que es 2^n
     N = 2**n
 
-    # Creamos el vector solucion, poniendo a 1 las posiciones que son solucion y a 0 el resto
     ket_t = np.zeros(N, dtype=complex)
     for index in solution_indices:
         ket_t[index] = 1.0
-
-    # Normalizamos el vector solucion para que sea valido en cuantica
-    # Si por ejemplo hay 3 soluciones, el vector tendra tres unos y se divide entre raiz de 3
     if np.linalg.norm(ket_t) > 1e-12:
         ket_t /= np.linalg.norm(ket_t)
 
-    # Creamos el vector no-solucion, poniendo a 1 las posiciones que no son solucion y a 0 las soluciones
     ket_r = np.ones(N, dtype=complex)
     for index in solution_indices:
         ket_r[index] = 0.0
-
-    # Normalizamos el vector de no-solucion
     if np.linalg.norm(ket_r) > 1e-12:
         ket_r /= np.linalg.norm(ket_r)
 
     return ket_r, ket_t
 
-###########################
-# PROYECCIÓN CORRECTA
-# con corrección de fase global
-###########################
-def project_state(statevector, solution_indices, n):
-    # Sacamos amplitudes
-    amps = statevector.data
 
-    # Construimos los vectores
+def project_state(statevector, solution_indices, n):
+    amps = statevector.data
     ket_r, ket_t = build_grover_basis(n, solution_indices)
 
-    # Calculamos c_r y c_t que es simplemente multiplicando nuestros vectores por las amplitudes
     c_r = np.vdot(ket_r, amps)
     c_t = np.vdot(ket_t, amps)
 
-    # Primero comprobamos que c_r no es prácticamente cero, para evitar problemas de división por cero al calcular la fase.
     if abs(c_r) > 1e-12:
-        # Creamos un numero que corrige ese angulo
         phase = np.exp(-1j * np.angle(c_r))
-
-        # Multiplicamos para corregir la fase global del estado y hacer que c_r sea real positivo
         c_r *= phase
         c_t *= phase
 
     return c_r.real, c_t.real
 
-###########################
-# ITERACIONES ÓPTIMAS
-###########################
-def optimal_iterations(n, M, choice):
 
-    # Calculamos el numero total de estados posibles
+# =========================
+# SOLUCIONES
+# =========================
+
+def get_solution_indices(choice, number, n):
     N = 2**n
 
-    # Si el oraculo es de tipo "one" usamos la formula clasica
-    # Esto corresponde al caso de una unica solucion
-    # Le restamos 1 para que se comporte igual que el programa antiguo
     if choice == "one":
-        return max(0, int(np.floor((np.pi / 4) * np.sqrt(N))) - 1)
+        return [number]
+    elif choice == "less":
+        return list(range(number))
+    elif choice == "greater":
+        return list(range(number + 1, N))
 
-    # Si no, usamos la formula general para multiples soluciones
-    # Evitamos division por cero por seguridad
+    return []
+
+
+def optimal_iterations(n, M):
+    N = 2**n
     if M == 0:
         return 0
-
     return int(np.floor((np.pi / 4) * np.sqrt(N / M)))
 
-###########################
+
+# =========================
+# GRAFICAS ESTATICAS
+# =========================
+
+def draw_iteration_subplot(ax, points, labels, iteration_number):
+    start_idx = 1 if iteration_number == 1 else 2 * iteration_number - 1
+    oracle_idx = 2 * iteration_number
+    diffuser_idx = 2 * iteration_number + 1
+
+    x_start, y_start = points[start_idx]
+    x_oracle, y_oracle = points[oracle_idx]
+    x_diff, y_diff = points[diffuser_idx]
+
+    label_start = labels[start_idx]
+    label_oracle = labels[oracle_idx]
+    label_diff = labels[diffuser_idx]
+
+    ax.axhline(0, linewidth=1.2, color="black")
+    ax.axvline(0, linewidth=1.2, color="black")
+
+    ax.quiver(0, 0, 1, 0, angles="xy", scale_units="xy", scale=1,
+              linestyle='dashed', color="black")
+    ax.text(1.05, 0, "|r>", fontsize=11)
+
+    ax.quiver(0, 0, 0, 1, angles="xy", scale_units="xy", scale=1,
+              linestyle='dashed', color="black")
+    ax.text(0, 1.05, "|t>", fontsize=11)
+
+    # Flecha de partida
+    ax.quiver(0, 0, x_start, y_start, angles="xy", scale_units="xy", scale=1,
+              color="green", width=0.006, alpha=0.9)
+    ax.scatter([x_start], [y_start], color="green", s=35)
+    ax.text(x_start + 0.03, y_start + 0.03, label_start, fontsize=9, color="green")
+
+    # Flecha oraculo
+    ax.quiver(0, 0, x_oracle, y_oracle, angles="xy", scale_units="xy", scale=1,
+              color="red", width=0.006, alpha=0.9)
+    ax.scatter([x_oracle], [y_oracle], color="red", s=35)
+    ax.text(x_oracle + 0.03, y_oracle + 0.03, label_oracle, fontsize=9, color="red")
+
+    # Flecha difusor
+    ax.quiver(0, 0, x_diff, y_diff, angles="xy", scale_units="xy", scale=1,
+              color="blue", width=0.006, alpha=0.9)
+    ax.scatter([x_diff], [y_diff], color="blue", s=35)
+    ax.text(x_diff + 0.03, y_diff + 0.03, label_diff, fontsize=9, color="blue")
+
+    # Segmentos de la reflexion de esta iteracion
+    ax.plot([x_start, x_oracle], [y_start, y_oracle], linestyle="--", linewidth=1.8, color="red", alpha=0.8)
+    ax.plot([x_oracle, x_diff], [y_oracle, y_diff], linestyle="--", linewidth=1.8, color="blue", alpha=0.8)
+
+    ax.set_title(f"Iteracion {iteration_number}", fontsize=12)
+    ax.set_xlim(-1.2, 1.2)
+    ax.set_ylim(-1.2, 1.2)
+    ax.set_aspect("equal")
+    ax.grid(alpha=0.3)
+
+
+def plot_grover_by_iteration(states, labels, n, solutions, choice, number):
+    iterations = (len(states) - 2) // 2
+
+    if iterations <= 0:
+        print("No hay iteraciones para representar.")
+        return
+
+    points = [project_state(s, solutions, n) for s in states]
+
+    ncols = min(3, iterations)
+    nrows = math.ceil(iterations / 3)
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows))
+
+    if isinstance(axes, np.ndarray):
+        axes = axes.ravel()
+    else:
+        axes = [axes]
+
+    for i in range(1, iterations + 1):
+        draw_iteration_subplot(axes[i - 1], points, labels, i)
+
+    for j in range(iterations, len(axes)):
+        axes[j].axis("off")
+
+    fig.suptitle(
+        f"Evolucion de Grover por iteraciones | tipo={choice}, numero={number}, qubits={n}",
+        fontsize=15
+    )
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+
+
+# =========================
+# EXPORTAR DATOS PARA MANIM
+# =========================
+
+def exportar_datos_manim(states, labels, n, solutions, choice, number):
+    points = [project_state(s, solutions, n) for s in states]
+    iterations = (len(states) - 2) // 2
+
+    data = {
+        "points": [[float(x), float(y)] for x, y in points],
+        "labels": labels,
+        "iterations": iterations,
+        "title": f"Grover: tipo={choice}, numero={number}, qubits={n}"
+    }
+
+    with open(MANIM_DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+
+
+def renderizar_con_manim():
+    if not MANIM_AVAILABLE:
+        print("Manim no está instalado.")
+        print("Instalalo con: pip install manim")
+        return
+
+    comando = [sys.executable, "-m", "manim", MANIM_QUALITY, __file__, "GroverScene"]
+    subprocess.run(comando)
+
+
+# =========================
 # ANALIZAR GROVER
-# Este metodo contruye la evolucion de Grover paso a paso y guarda el estado después de cada paso
-###########################
+# =========================
+
 def analyze_grover(n, number, choice):
     qc = QuantumCircuit(n)
 
-    # Lista que ira almacenando los estados después de cada paso
-    states = []  
-
-    # Lista que ira almacenando las etiquetas para cada estado, por ejemplo "oracle_1", "diffuser_1", etc.
+    states = []
     labels = []
 
-    # Al principio guardamos el estado inicial, que es |0>
-    states.append(get_state(qc))
+    state = get_state(qc)
+    print("\n--- Estado inicial |0...0> ---")
+    print(state)
+    states.append(state)
     labels.append("init")
 
-    # Aplicamos Hadamard a todos los qubits para crear la superposición uniforme |s⟩
     qc.h(range(n))
-    states.append(get_state(qc))
-    labels.append("|s⟩")
+    state = get_state(qc)
+    print("\n--- Estado |s> ---")
+    print(state)
+    states.append(state)
+    labels.append("|s>")
 
-    # Elegimos el oraculo una sola vez
     if choice == "one":
         oracle_circuit = mark_one(number, n)
         oracle_label = f"== {number}"
-
     elif choice == "less":
         oracle_circuit = oracle_less(number, n)
         oracle_label = f"< {number}"
-
-    else:
+    elif choice == "greater":
         oracle_circuit = oracle_greater(number, n)
         oracle_label = f"> {number}"
+    else:
+        print("Tipo de oraculo no soportado")
+        return [], []
 
-    # Calculamos numero de soluciones
-    M = compute_M(choice, number, n)
-    print("Numero de soluciones (M):", M)
+    solutions = get_solution_indices(choice, number, n)
+    M = len(solutions)
 
-    # Calculamos numero de iteraciones optimas
-    iterations = optimal_iterations(n, M, choice)
-    if iterations == 0:
-        print("Caso no interesante para visualizar")
-        return [], [], choice
+    print("\nNumero de soluciones (M):", M)
+    print("Soluciones:", solutions)
+
+    iterations = optimal_iterations(n, M)
     print("Numero de iteraciones:", iterations)
 
-    # Aplicamos las iteraciones de Grover con el mismo esquema del programa antiguo:
-    # oraculo -> difusor
+    if iterations == 0:
+        print("No hay iteraciones interesantes")
+        return [], []
+
     for i in range(iterations):
-        # Marcamos solucion
         qc.append(oracle_circuit.to_gate(), list(range(n)))
-        states.append(get_state(qc))
-        labels.append(rf"$O_{{{i+1}}}$ ({oracle_label})")
+        state = get_state(qc)
+        print(f"\n--- Estado tras Oraculo {i+1} ({oracle_label}) ---")
+        print(state)
+        states.append(state)
+        labels.append(f"O_{i+1}")
 
-        # Applicamos el difusor para amplificar la solucion
         diffuser(qc, n)
-        states.append(get_state(qc))
-        labels.append(rf"$D_{{{i+1}}}$")
+        state = get_state(qc)
+        print(f"\n--- Estado tras Difusor {i+1} ---")
+        print(state)
+        states.append(state)
+        labels.append(f"D_{i+1}")
 
-    # DEBUG
-    for i in range(len(states)):
-        print("Estados:", states[i])
+    return states, labels
 
-    print(qc.draw())
 
-    return states, labels, choice
+# =========================
+# UTILIDADES DE ANALISIS DEL QASM
+# =========================
 
-###########################
-# OBTENER SOLUCIONES DEL ORACULO
-# Devuelve los indices de los estados que son solucion segun el oraculo usado
-###########################
-def get_solution_indices(choice, number, n):
+def qindex(q):
+    if hasattr(q, "_index"):
+        return q._index
+    return q.index
 
-    # Calculamos el numero total de estados posibles
-    N = 2**n
 
-    # Si el oraculo marca solo un numero, la unica solucion es ese numero
-    if choice == "one":
-        return [number]
-
-    # Si el oraculo marca los menores, las soluciones son desde 0 hasta number-1
-    elif choice == "less":
-        return list(range(number))
-
-    # Si el oraculo marca los mayores, las soluciones son desde number+1 hasta N-1
-    else:
-        return list(range(number + 1, N))
-
-###########################
-# VISUALIZACIÓN 
-###########################
-def plot_grover_step_by_step(states, labels, n, number, choice):
-
-    solution_indices = get_solution_indices(choice, number, n)
-
-    num_plots = (len(states) - 2) // 2
-    fig, axes = plt.subplots(1, num_plots, figsize=(5 * num_plots, 5))
-
-    # Si solo hay una iteración, axes no es lista → lo convertimos
-    if num_plots == 1:
-        axes = [axes]
-
-    plot_idx = 0
-
-    for k in range(4, len(states) + 1, 2):
-
-        ax = axes[plot_idx]
-        plot_idx += 1
-
-        partial_states = states[:k]
-        partial_labels = labels[:k]
-
-        # Proyección
-        points = [project_state(s, solution_indices, n) for s in partial_states]
-
-        xs = [p[0] for p in points]
-        ys = [p[1] for p in points]
-
-        # Ejes
-        ax.axhline(0, linewidth=1.2)
-        ax.axvline(0, linewidth=1.2)
-
-        # Base |r⟩
-        ax.quiver(
-            0, 0, 1, 0,
-            angles="xy",
-            scale_units="xy",
-            scale=1,
-            linestyle='dashed',
-            color="black"
+def cargar_circuito(path):
+    with open(path, "r") as f:
+        return loads(
+            f.read(),
+            custom_instructions=LEGACY_CUSTOM_INSTRUCTIONS
         )
-        ax.text(1.05, 0, "|r⟩", fontsize=12)
 
-        # Base |t⟩
-        ax.quiver(
-            0, 0, 0, 1,
-            angles="xy",
-            scale_units="xy",
-            scale=1,
-            linestyle='dashed',
-            color="black"
+
+def pedir_numero_valido(n):
+    root = tk.Tk()
+    root.withdraw()
+
+    max_val = 2**n - 1
+
+    while True:
+        numero = simpledialog.askinteger(
+            "Entrada",
+            f"Introduce la solucion (0 - {max_val}):"
         )
-        ax.text(0, 1.05, "|t⟩", fontsize=12)
 
-        # Dibujar vectores
-        for (x, y), label in zip(points[1:], partial_labels[1:]):
+        if numero is None:
+            return None
 
-            color = "black"
-
-            if "O" in label:
-                color = "red"
-            elif "D" in label:
-                color = "blue"
-            elif label == "|s⟩":
-                color = "green"
-
-            ax.quiver(
-                0, 0, x, y,
-                angles="xy",
-                scale_units="xy",
-                scale=1,
-                color=color,
-                width=0.006,
-                alpha=0.85
-            )
-
-            ax.text(x + 0.04, y + 0.04, label, fontsize=9)
-
-        # Trayectoria
-        ax.plot(xs, ys, linestyle="--", linewidth=2, marker="o", color="gray")
-
-        # Título por iteración
-        iteracion = (k // 2) - 1
-        ax.set_title(f"Iter {iteracion}")
-
-        # Escala fija (IMPORTANTE)
-        ax.set_xlim(-1.2, 1.2)
-        ax.set_ylim(-1.2, 1.2)
-
-        ax.set_aspect('equal')
-        ax.grid(alpha=0.3)
-
-    # Título general
-    plt.suptitle(f"Grover paso a paso (n={n}, número={number}, tipo={choice})")
-
-    plt.tight_layout()
-    plt.show()
-
-        
+        if 0 <= numero <= max_val:
+            return numero
+        else:
+            messagebox.showerror("Error", f"Numero fuera de rango (0 - {max_val})")
 
 
-###########################
-# NUMERO DE SOLUCIONES
-# M = numero de estados que cumplen la condicion del oraculo
-###########################
-def compute_M(choice, number, n):
+def es_capa_h_inicial(qc):
+    n = qc.num_qubits
+    if len(qc.data) < n:
+        return False
 
-    # Calculamos el numero total de estados posibles
-    N = 2**n
+    primeras = qc.data[:n]
+    if not all(instr.operation.name == "h" for instr in primeras):
+        return False
 
-    # Si el oraculo marca solo un numero, entonces solo hay una solucion
-    if choice == "one":
-        return 1
+    qubits = [qindex(instr.qubits[0]) for instr in primeras]
+    return sorted(qubits) == list(range(n))
 
-    # Si el oraculo marca los menores, las soluciones son:
-    # 0, 1, 2, ..., number-1
-    elif choice == "less":
-        return number
 
-    # Si el oraculo marca los mayores, las soluciones son:
-    # number+1, ..., N-1
-    else:
-        return N - (number + 1)
+def detectar_inicio_difusor(qc):
+    ops = qc.data
+    n = qc.num_qubits
+    total = len(ops)
+
+    for i in range(n, total):
+        if i + 2 * n + 3 > total:
+            break
+
+        bloque_h = ops[i:i+n]
+        bloque_x = ops[i+n:i+2*n]
+
+        if not all(instr.operation.name == "h" for instr in bloque_h):
+            continue
+        if not all(instr.operation.name == "x" for instr in bloque_x):
+            continue
+
+        qubits_h = sorted(qindex(instr.qubits[0]) for instr in bloque_h)
+        qubits_x = sorted(qindex(instr.qubits[0]) for instr in bloque_x)
+
+        if qubits_h != list(range(n)) or qubits_x != list(range(n)):
+            continue
+
+        return i
+
+    return None
+
+
+def extraer_bloque_oraculo(qc):
+    if not es_capa_h_inicial(qc):
+        return None
+
+    inicio_difusor = detectar_inicio_difusor(qc)
+    if inicio_difusor is None:
+        return None
+
+    n = qc.num_qubits
+    oracle_ops = qc.data[n:inicio_difusor]
+
+    oracle_qc = QuantumCircuit(n)
+    for instr in oracle_ops:
+        qargs = [qindex(q) for q in instr.qubits]
+        oracle_qc.append(instr.operation, qargs, [])
+
+    return oracle_qc
+
+
+def detectar_tipo_oraculo_desde_qasm(qc):
+    oracle_qc = extraer_bloque_oraculo(qc)
+    if oracle_qc is None:
+        return None
+
+    ops = oracle_qc.data
+
+    if len(ops) != 3:
+        return None
+
+    n1 = ops[0].operation.name
+    n2 = ops[1].operation.name
+    n3 = ops[2].operation.name
+
+    if n2 not in ("ccx", "mcx"):
+        return None
+
+    if n1 == "h" and n3 == "h":
+        return "one"
+
+    if n1 == "x" and n3 == "x":
+        return "less"
+
+    if n1 == "z" and n3 == "z":
+        return "greater"
+
+    return None
+
+
+def obtener_parametros_desde_qasm():
+    root = tk.Tk()
+    root.withdraw()
+    root.update()
+
+    path = filedialog.askopenfilename(
+        title="Selecciona un circuito Grover (.qasm)",
+        filetypes=[("Archivos QASM", "*.qasm")]
+    )
+
+    root.destroy()
+
+    if not path:
+        print("No se selecciono archivo")
+        return None
+
+    qc = cargar_circuito(path)
+    n = qc.num_qubits
+
+    if not es_capa_h_inicial(qc):
+        print("El circuito no empieza con una superposicion uniforme de Grover")
+        return None
+
+    if detectar_inicio_difusor(qc) is None:
+        print("No se ha detectado un difusor con estructura de Grover")
+        return None
+
+    number = pedir_numero_valido(n)
+    if number is None:
+        print("Entrada cancelada")
+        return None
+
+    choice = detectar_tipo_oraculo_desde_qasm(qc)
+    if choice is None:
+        print("No se pudo detectar el tipo de oraculo")
+        print("Ahora mismo solo detecto patrones estructurales diferenciables")
+        return None
+
+    print("Numero de qubits:", n)
+    print("Tipo detectado:", choice)
+    print("Numero introducido:", number)
+
+    return n, number, choice
+
+
 # =========================
 # MAIN
 # =========================
-import random
 
 def main():
-    while True:
-        n = random.randint(3, 7)
-        number = random.randint(0, 2**n - 1)
+    params = obtener_parametros_desde_qasm()
 
-        choice = random.choice(["one","less", "greater"])
-
-        M = compute_M(choice, number, n)
-        N = 2**n
-
-        
-        if 1 <= M <= N // 4:
-            break
-
-    print("Número de qubits:", n)
-    print("Número objetivo:", number)
-    print("Oraculo elegido:", choice)
-
-    states, labels, choice = analyze_grover(n, number, choice)
-    if not states:
-        print("No hay estados para graficar.")
+    if params is None:
         return
-    
-    plot_grover_step_by_step(states, labels, n, number, choice)
-    
+
+    n, number, choice = params
+
+    states, labels = analyze_grover(n, number, choice)
+
+    if not states:
+        print("No hay estados para representar.")
+        return
+
+    solutions = get_solution_indices(choice, number, n)
+
+    if GENERAR_GRAFICAS:
+        plot_grover_by_iteration(states, labels, n, solutions, choice, number)
+
+    if GENERAR_VIDEO_MANIM:
+        exportar_datos_manim(states, labels, n, solutions, choice, number)
+        renderizar_con_manim()
+
 
 if __name__ == "__main__":
     main()

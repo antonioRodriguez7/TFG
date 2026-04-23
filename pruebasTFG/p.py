@@ -1,204 +1,206 @@
-from qiskit import QuantumCircuit
-from qiskit.quantum_info import Statevector
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
-###########################
-# ORÁCULO GENERAL
-# Marcamos la solucion con fase negativa
-###########################
-def oracle(qc, solution):
-    n = len(solution)
-    # Si tenemos 1011 nosotros interpretamos como q0, q1, q2, q3 pero qiskit lo interpreta al revés, esto sucede porque en informatica clasica, los numeros binarios se interpretan
-    # de esa forma, siendo el bit de la derecha el menos significativo, por eso Qiskit lo interpreta al revés.
-    # Para ello usamos el 'reserved' para invertir el orden de los bits, así el bit de la derecha (menos significativo) se corresponde con el qubit 0, y el bit de la izquierda (más significativo) se corresponde con el qubit n-1.
-    # Tras esto recorremos bit a bit y cambiamos 0 por 1, para luego modificar la fase del estado objetivo.
-    for i, bit in enumerate(reversed(solution)):
-        if bit == '0':
-            qc.x(i)
-    # Al aplicar H convertimos |1> en |->, ya que  convertimos: |+> = (|0> + |1>) y |-> = (|0> - |1>)
-    qc.h(n - 1)
-    # Aplicamos MCX, que en Qiskit significa: “Si TODOS los qubits de control están a 1 → aplica una X al qubit objetivo”
-    # El list(range(n - 1)): genera una lista para los qubits de control, si tenemos 5 qubits genera [0, 1, 2, y 3]
-    # El n - 1: es el qubit objetivo, en este caso el qubit 4 (el más significativo)
-    # Esto quiere decir: “Si los qubits 0,1,2,3 están TODOS en 1 → aplica una X al qubit 4”
-    # Con mode="noancilla" le decimos a Qiskit que no use qubits auxiliares para implementar el MCX, lo cual es posible si el número de qubits de control es menor o igual a 4.
-    qc.mcx(list(range(n - 1)), n - 1, mode="noancilla")
-    # Volvemos a aplicar H para convertir |-> de nuevo en |1>, pero ya con la fase negativa aplicada al estado objetivo.
-    qc.h(n - 1)
-    # Vueve al estado original pero con la fase negativa aplicada al estado objetivo, por eso volvemos a recorrer los bits y cambiamos 0 por 1.
-    for i, bit in enumerate(reversed(solution)):
-        if bit == '0':
-            qc.x(i)
+from qiskit import QuantumCircuit
+from qiskit.quantum_info import Statevector
 
-###########################
-# DIFUSOR GENERAL
-# #########################
+
+# =========================
+# CARGAR ORÁCULO DESDE QASM
+# =========================
+def load_oracle(path):
+    return QuantumCircuit.from_qasm_file(path)
+
+
+# =========================
+# DETECTAR SOLUCIONES
+# =========================
+def detect_solutions(oracle_circuit, n):
+
+    solutions = []
+
+    for i in range(2**n):
+
+        state = Statevector.from_int(i, dims=2**n)
+        final_state = state.evolve(oracle_circuit)
+
+        amp_in = state.data[i]
+        amp_out = final_state.data[i]
+
+        if np.isclose(amp_out, -amp_in):
+            solutions.append(i)
+
+    return solutions
+
+
+# =========================
+# VALIDAR ORÁCULO
+# =========================
+def is_valid_oracle(oracle_circuit, n):
+
+    for i in range(2**n):
+
+        state = Statevector.from_int(i, dims=2**n)
+        final_state = state.evolve(oracle_circuit)
+
+        non_zero = np.nonzero(final_state.data)[0]
+
+        # Debe haber solo un estado activo (no mezcla)
+        if len(non_zero) != 1:
+            return False
+
+    return True
+
+
+# =========================
+# DIFUSOR
+# =========================
 def diffuser(qc, n):
+
     qc.h(range(n))
     qc.x(range(n))
 
     qc.h(n - 1)
-    qc.mcx(list(range(n - 1)), n - 1, mode="noancilla")
+    qc.mcx(list(range(n - 1)), n - 1)
     qc.h(n - 1)
 
     qc.x(range(n))
     qc.h(range(n))
 
-###########################
-# EXTRAER ESTADO
-###########################
-def get_state(qc):
-    return Statevector.from_instruction(qc)
 
-###########################
-# BASE DEL PLANO DE GROVER
-# |t> = solución
-# |r> = superposición uniforme de los no-solución
-# Esto nos permite reducir el problema de muchas dimensiones a solo 2
-###########################
-def build_grover_basis(n, solution_index):
-    # Calculamos el número total de estados posibles con n qubits, que es 2^n
+# =========================
+# BASE DE GROVER
+# =========================
+def build_grover_basis(n, solution_indices):
+
     N = 2**n
-    # Creamos el vector solucion, poniendo todo los elementos 0 menos el índice de la solución, que ponemos a 1
+
     ket_t = np.zeros(N, dtype=complex)
-    ket_t[solution_index] = 1.0
-    # Creamos el siguiente vector, poniendo todo los elementos a 1, excepto el índice de la solución, que ponemos a 0
+    for i in solution_indices:
+        ket_t[i] = 1
+
+    if np.linalg.norm(ket_t) > 0:
+        ket_t /= np.linalg.norm(ket_t)
+
     ket_r = np.ones(N, dtype=complex)
-    ket_r[solution_index] = 0.0
-    # Ahora vamos a normaliar el vector para que se valido en cuantica, teniendo en cuenta que todos los valores deben de sumar 1 para que sea valido
-    # Si tenemos [1, 1, 0, 1], se hace raíz de (1² + 1² + 0² + 1²), que es √(1 + 1 + 0 + 1) = √3, por lo tanto luego se hace ket_r / √3, quedando [1/√3, 1/√3, 0, 1/√3], asi de esta forma:(1/√3)² + (1/√3)² + (1/√3)² = 1 
-    ket_r /= np.linalg.norm(ket_r)
+    for i in solution_indices:
+        ket_r[i] = 0
+
+    if np.linalg.norm(ket_r) > 0:
+        ket_r /= np.linalg.norm(ket_r)
 
     return ket_r, ket_t
 
-###########################
-# PROYECCIÓN CORRECTA
-# con corrección de fase global
-###########################
-def project_state(statevector, solution_index, n):
-    # Sacamos amplitudes
-    amps = statevector.data
-    print("Aplitudes:", amps)
-    # Construimos los vectores
-    ket_r, ket_t = build_grover_basis(n, solution_index)
 
-    # coeficientes en la base {|r>, |t>}
+# =========================
+# PROYECCIÓN
+# =========================
+def project_state(statevector, solution_indices, n):
+
+    amps = statevector.data
+    ket_r, ket_t = build_grover_basis(n, solution_indices)
+
     c_r = np.vdot(ket_r, amps)
     c_t = np.vdot(ket_t, amps)
 
-    # fijar fase global para que c_r sea real positivo
     if abs(c_r) > 1e-12:
         phase = np.exp(-1j * np.angle(c_r))
         c_r *= phase
         c_t *= phase
-    print(f"Después de corrección de fase: c_r = {c_r.real}, c_t = {c_t.real}")
+
     return c_r.real, c_t.real
 
 
 # =========================
 # ITERACIONES ÓPTIMAS
 # =========================
-def optimal_iterations(n):
+def optimal_iterations(n, M):
+
     N = 2**n
-    return int(np.floor((np.pi / 4) * np.sqrt(N)))
+
+    if M == 0:
+        return 0
+
+    return int(np.floor((np.pi / 4) * np.sqrt(N / M)))
 
 
 # =========================
 # ANALIZAR GROVER
 # =========================
-def analyze_grover(n, solution, iterations):
+def analyze_grover(n, oracle_circuit, solution_indices):
+
     qc = QuantumCircuit(n)
+
     states = []
     labels = []
 
-    states.append(get_state(qc))
+    states.append(Statevector.from_instruction(qc))
     labels.append("init")
 
     qc.h(range(n))
-    states.append(get_state(qc))
+    states.append(Statevector.from_instruction(qc))
     labels.append("|s⟩")
 
+    M = len(solution_indices)
+    iterations = optimal_iterations(n, M)
+
+    print("Soluciones detectadas:", solution_indices)
+    print("M =", M)
+    print("Iteraciones =", iterations)
+
     for i in range(iterations):
-        oracle(qc, solution)
-        states.append(get_state(qc))
-        labels.append(f"oracle_{i+1}")
+
+        qc.append(oracle_circuit.to_gate(), range(n))
+        states.append(Statevector.from_instruction(qc))
+        labels.append(f"O{i+1}")
 
         diffuser(qc, n)
-        states.append(get_state(qc))
-        labels.append(f"diffuser_{i+1}")
+        states.append(Statevector.from_instruction(qc))
+        labels.append(f"D{i+1}")
 
     return states, labels
 
 
 # =========================
-# VISUALIZACIÓN MEJORADA
+# PLOT
 # =========================
-def plot_grover(states, labels, n, solution):
-    solution_index = int(solution, 2)
-    points = [project_state(s, solution_index, n) for s in states]
+def plot_grover(states, labels, n, solution_indices):
+
+    points = [project_state(s, solution_indices, n) for s in states]
 
     xs = [p[0] for p in points]
     ys = [p[1] for p in points]
 
-    plt.figure(figsize=(9, 7))
+    plt.figure(figsize=(8, 6))
 
-    # Ejes
-    plt.axhline(0, linewidth=1.2)
-    plt.axvline(0, linewidth=1.2)
+    plt.axhline(0)
+    plt.axvline(0)
 
-    # Base |r⟩ y |t⟩
-    plt.quiver(0, 0, 1, 0, angles="xy", scale_units="xy", scale=1,
-               linestyle='dashed', color="black")
-    plt.text(1.05, 0, "|r⟩", fontsize=12)
+    plt.quiver(0, 0, 1, 0, scale=1, scale_units="xy")
+    plt.text(1.05, 0, "|r⟩")
 
-    plt.quiver(0, 0, 0, 1, angles="xy", scale_units="xy", scale=1,
-               linestyle='dashed', color="black")
-    plt.text(0, 1.05, "|t⟩", fontsize=12)
+    plt.quiver(0, 0, 0, 1, scale=1, scale_units="xy")
+    plt.text(0, 1.05, "|t⟩")
 
-    # Dibujar vectores
-    for (x, y), label in zip(points, labels):
+    for (x, y), label in zip(points[1:], labels[1:]):
+
         color = "black"
-
-        if "oracle" in label:
+        if "O" in label:
             color = "red"
-        elif "diffuser" in label:
+        elif "D" in label:
             color = "blue"
         elif label == "|s⟩":
             color = "green"
 
-        plt.quiver(
-            0, 0, x, y,
-            color=color,
-            scale=1,
-            scale_units="xy",
-            width=0.006,
-            alpha=0.85
-        )
+        plt.quiver(0, 0, x, y, color=color)
+        plt.text(x + 0.03, y + 0.03, label)
 
-        plt.text(x + 0.04, y + 0.04, label, fontsize=9)
+    plt.plot(xs, ys, "--o")
 
-    # Trayectoria
-    plt.plot(xs, ys, linestyle="--", linewidth=2, marker="o", color="gray")
-
-    # Leyenda
-    red_patch = mpatches.Patch(color='red', label='Oráculo')
-    blue_patch = mpatches.Patch(color='blue', label='Difusor')
-    green_patch = mpatches.Patch(color='green', label='Estado inicial |s⟩')
-
-    plt.legend(handles=[red_patch, blue_patch, green_patch])
-
-    # Labels
-    plt.xlabel("Componente en |r⟩", fontsize=12)
-    plt.ylabel("Componente en |t⟩", fontsize=12)
-    plt.title(f"Evolución geométrica de Grover (n={n}, solución={solution})", fontsize=14)
-
+    plt.title("Grover con oráculo externo")
     plt.axis("equal")
-    plt.xlim(-0.2, 1.2)
-    plt.ylim(-1.1, 1.1)
-    plt.grid(alpha=0.3)
-
+    plt.grid()
     plt.show()
 
 
@@ -206,13 +208,25 @@ def plot_grover(states, labels, n, solution):
 # MAIN
 # =========================
 def main():
-    n = int(input("Número de qubits: "))
-    solution = input("Solución en binario: ")
 
-    iterations = optimal_iterations(n) - 1
+    path = "oracle.qasm"
 
-    states, labels = analyze_grover(n, solution, iterations)
-    plot_grover(states, labels, n, solution)
+    oracle = load_oracle(path)
+    n = oracle.num_qubits
+
+    print("Qubits:", n)
+
+    if not is_valid_oracle(oracle, n):
+        print("❌ El circuito NO es un oráculo válido")
+        return
+
+    print("✅ Oráculo válido")
+
+    solutions = detect_solutions(oracle, n)
+
+    states, labels = analyze_grover(n, oracle, solutions)
+
+    plot_grover(states, labels, n, solutions)
 
 
 if __name__ == "__main__":
