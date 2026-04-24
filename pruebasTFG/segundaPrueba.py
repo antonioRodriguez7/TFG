@@ -14,9 +14,9 @@ import os
 import sys
 import subprocess
 
-# =========================
+# #########################
 # CONFIGURACION
-# =========================
+# #########################
 
 GENERAR_GRAFICAS = True
 GENERAR_VIDEO_MANIM = True
@@ -31,9 +31,9 @@ except ImportError:
     MANIM_AVAILABLE = False
 
 
-# =========================
+# #########################
 # ESCENA MANIM
-# =========================
+# #########################
 
 if MANIM_AVAILABLE:
     class GroverScene(Scene):
@@ -138,9 +138,9 @@ if MANIM_AVAILABLE:
             self.wait(2)
 
 
-# =========================
+# #########################
 # ORACULOS REALES
-# =========================
+# #########################
 
 def mark_one(number, nqubits, name=None):
     if isinstance(number, str):
@@ -232,9 +232,9 @@ def oracle_greater(number, nqubits, name=None):
     return circuit
 
 
-# =========================
+# #########################
 # DIFUSOR
-# =========================
+# #########################
 
 def diffuser(qc, n):
     qc.h(range(n))
@@ -248,18 +248,16 @@ def diffuser(qc, n):
     qc.h(range(n))
 
 
-# =========================
+# #########################
 # ESTADO
-# =========================
-
+# #########################
 def get_state(qc):
     return Statevector.from_instruction(qc)
 
 
-# =========================
+# #########################
 # BASE DE GROVER
-# =========================
-
+# #########################
 def build_grover_basis(n, solution_indices):
     N = 2**n
 
@@ -293,10 +291,9 @@ def project_state(statevector, solution_indices, n):
     return c_r.real, c_t.real
 
 
-# =========================
+# #########################
 # SOLUCIONES
-# =========================
-
+# #########################
 def get_solution_indices(choice, number, n):
     N = 2**n
 
@@ -317,9 +314,10 @@ def optimal_iterations(n, M):
     return int(np.floor((np.pi / 4) * np.sqrt(N / M)))
 
 
-# =========================
+# #########################
 # GRAFICAS ESTATICAS
-# =========================
+# #########################
+
 
 def draw_iteration_subplot(ax, points, labels, iteration_number):
     start_idx = 1 if iteration_number == 1 else 2 * iteration_number - 1
@@ -408,9 +406,9 @@ def plot_grover_by_iteration(states, labels, n, solutions, choice, number):
     plt.show()
 
 
-# =========================
+# #########################
 # EXPORTAR DATOS PARA MANIM
-# =========================
+# #########################
 
 def exportar_datos_manim(states, labels, n, solutions, choice, number):
     points = [project_state(s, solutions, n) for s in states]
@@ -437,9 +435,9 @@ def renderizar_con_manim():
     subprocess.run(comando)
 
 
-# =========================
+# #########################
 # ANALIZAR GROVER
-# =========================
+# #########################
 
 def analyze_grover(n, number, choice):
     qc = QuantumCircuit(n)
@@ -504,16 +502,16 @@ def analyze_grover(n, number, choice):
     return states, labels
 
 
-# =========================
+# #########################
 # UTILIDADES DE ANALISIS DEL QASM
-# =========================
+# #########################
 
 def qindex(q):
     if hasattr(q, "_index"):
         return q._index
     return q.index
 
-
+# Convertimos nuestro circuito QASM a QuantumCircuit de Qiskit para analizarlo
 def cargar_circuito(path):
     with open(path, "r") as f:
         return loads(
@@ -521,7 +519,7 @@ def cargar_circuito(path):
             custom_instructions=LEGACY_CUSTOM_INSTRUCTIONS
         )
 
-
+# Pedimos al usuario que introduzca un numero valido para el tipo de oraculo detectado
 def pedir_numero_valido(n):
     root = tk.Tk()
     root.withdraw()
@@ -542,21 +540,23 @@ def pedir_numero_valido(n):
         else:
             messagebox.showerror("Error", f"Numero fuera de rango (0 - {max_val})")
 
-
+# Comprobamos que todos los qubits empiezan con una puerta Hadamart
 def es_capa_h_inicial(qc):
     n = qc.num_qubits
     if len(qc.data) < n:
         return False
 
     primeras = qc.data[:n]
+    # Aqui comprobamos que todas las primeras n sean puertas h
     if not all(instr.operation.name == "h" for instr in primeras):
         return False
 
     qubits = [qindex(instr.qubits[0]) for instr in primeras]
     return sorted(qubits) == list(range(n))
 
-
+# Este metodo tiene como objetivo detectar un patrón de inicio de difusor
 def detectar_inicio_difusor(qc):
+    # Sacamos el numero de operaciones del circuito
     ops = qc.data
     n = qc.num_qubits
     total = len(ops)
@@ -568,6 +568,8 @@ def detectar_inicio_difusor(qc):
         bloque_h = ops[i:i+n]
         bloque_x = ops[i+n:i+2*n]
 
+        # Reccoremos todo el circuito buscando en cada posición si hay n Hadamartas seguidas de n puertas X,
+        # tras esto comprobamos que actuan sobre todos los qubits, y si lo encuentro devuelve la posicion de inicio
         if not all(instr.operation.name == "h" for instr in bloque_h):
             continue
         if not all(instr.operation.name == "x" for instr in bloque_x):
@@ -583,7 +585,7 @@ def detectar_inicio_difusor(qc):
 
     return None
 
-
+# Este metodo se encarga de extraer el bloque de operaciones que corresponde al oraculo
 def extraer_bloque_oraculo(qc):
     if not es_capa_h_inicial(qc):
         return None
@@ -593,16 +595,19 @@ def extraer_bloque_oraculo(qc):
         return None
 
     n = qc.num_qubits
+    # Cogemos la informacion desde n hasta el inicio del difusor
     oracle_ops = qc.data[n:inicio_difusor]
 
     oracle_qc = QuantumCircuit(n)
     for instr in oracle_ops:
+        # Recorremos indices de los qubits sobre los tu actua la instruccion
         qargs = [qindex(q) for q in instr.qubits]
+        # Aniadimos la instruccion al circuito del oraculo con los qubits corregidos
         oracle_qc.append(instr.operation, qargs, [])
 
     return oracle_qc
 
-
+# Detectamos que tipo de oraculo tenemos
 def detectar_tipo_oraculo_desde_qasm(qc):
     oracle_qc = extraer_bloque_oraculo(qc)
     if oracle_qc is None:
@@ -637,6 +642,7 @@ def obtener_parametros_desde_qasm():
     root.withdraw()
     root.update()
 
+    # Abrimos explorador de archivos para seleccionar el circuito QASM
     path = filedialog.askopenfilename(
         title="Selecciona un circuito Grover (.qasm)",
         filetypes=[("Archivos QASM", "*.qasm")]
@@ -651,6 +657,7 @@ def obtener_parametros_desde_qasm():
     qc = cargar_circuito(path)
     n = qc.num_qubits
 
+    # Comprobamos que el circuito empieza con una capa de Hadamards (superposicion uniforme)
     if not es_capa_h_inicial(qc):
         print("El circuito no empieza con una superposicion uniforme de Grover")
         return None
@@ -667,7 +674,6 @@ def obtener_parametros_desde_qasm():
     choice = detectar_tipo_oraculo_desde_qasm(qc)
     if choice is None:
         print("No se pudo detectar el tipo de oraculo")
-        print("Ahora mismo solo detecto patrones estructurales diferenciables")
         return None
 
     print("Numero de qubits:", n)
@@ -677,9 +683,9 @@ def obtener_parametros_desde_qasm():
     return n, number, choice
 
 
-# =========================
+# #########################
 # MAIN
-# =========================
+# #########################
 
 def main():
     params = obtener_parametros_desde_qasm()
