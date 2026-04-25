@@ -35,7 +35,7 @@ def construir_subcircuito_desde_ops(ops, n):
 
 
 # =========================
-# ORACULO ESPERADO DESDE CSV
+# ORACULOS INTERNOS
 # =========================
 
 def mark_one(number, nqubits, name=None):
@@ -61,13 +61,116 @@ def mark_one(number, nqubits, name=None):
     return circuit
 
 
+def to_binary(number: int, nbits: int | None = None) -> str:
+    binary = bin(number)[2:]
+    if nbits is None:
+        return binary
+    if nbits < len(binary):
+        raise ValueError(f"nbits must be >= {len(binary)}")
+    return binary.zfill(nbits)
+
+
+def multi_control_z(nqubits: int) -> QuantumCircuit:
+    circuit = QuantumCircuit(nqubits, name=f"MCZ({nqubits})")
+    circuit.h(nqubits - 1)
+    circuit.append(MCXGate(nqubits - 1), range(nqubits))
+    circuit.h(nqubits - 1)
+    return circuit
+
+
+def oracle_less(number: int, nqubits: int, name=None):
+    circuit = QuantumCircuit(nqubits, name=name if name else f"< {number}")
+    num_binary = to_binary(number, nqubits)
+
+    if num_binary[0] == "1":
+        circuit.x(nqubits - 1)
+        circuit.z(nqubits - 1)
+        circuit.x(nqubits - 1)
+    else:
+        circuit.x(nqubits - 1)
+
+    for position1, value in enumerate(num_binary[1:]):
+        position = position1 + 1
+
+        if value == "0":
+            circuit.x(nqubits - position - 1)
+        else:
+            circuit.x(nqubits - position - 1)
+
+            multi_z = multi_control_z(position + 1)
+            circuit.append(
+                multi_z.to_gate(),
+                list(range(nqubits - 1, nqubits - position - 2, -1))
+            )
+
+            circuit.x(nqubits - position - 1)
+
+    for position, value in enumerate(num_binary):
+        if value == "0":
+            circuit.x(nqubits - position - 1)
+
+    return circuit
+
+
+def es_primo(n):
+    if n < 2:
+        return False
+    if n == 2:
+        return True
+    if n % 2 == 0:
+        return False
+
+    d = 3
+    while d * d <= n:
+        if n % d == 0:
+            return False
+        d += 2
+
+    return True
+
+
+def oracle_from_marked_states(marked_states, nqubits, name=None):
+    circuit = QuantumCircuit(nqubits, name=name if name else "oracle_marked_states")
+
+    for state in sorted(set(marked_states)):
+        circuit.append(mark_one(state, nqubits).to_gate(), range(nqubits))
+
+    return circuit
+
+
+def oracle_greater(number, nqubits, name=None):
+    marked = list(range(number + 1, 2**nqubits))
+    return oracle_from_marked_states(
+        marked,
+        nqubits,
+        name=name if name else f"> {number}"
+    )
+
+
+def oracle_evens(nqubits, name=None):
+    marked = [i for i in range(2**nqubits) if i % 2 == 0]
+    return oracle_from_marked_states(
+        marked,
+        nqubits,
+        name=name if name else "evens"
+    )
+
+
+def oracle_primes(nqubits, name=None):
+    marked = [i for i in range(2**nqubits) if es_primo(i)]
+    return oracle_from_marked_states(
+        marked,
+        nqubits,
+        name=name if name else "primes"
+    )
+
+
+# =========================
+# ORACULO ESPERADO DESDE CSV
+# =========================
+
 def construir_oraculo_esperado_desde_csv(soluciones_csv, n):
-    oracle_qc = QuantumCircuit(n)
-
-    for estado in soluciones_csv:
-        oracle_qc.append(mark_one(estado, n).to_gate(), range(n))
-
-    return oracle_qc
+    return oracle_from_marked_states(soluciones_csv, n, name="oracle_csv")
 
 
 def obtener_vector_esperado_desde_csv(psi_in, soluciones_csv, n):
@@ -182,25 +285,8 @@ def detectar_estados_marcados_desde_vectores(psi_in, psi_out, tol=1e-8):
 
 
 # =========================
-# CLASIFICACION SEMANTICA DEL ORACULO
+# CLASIFICACION SEMANTICA
 # =========================
-
-def es_primo(n):
-    if n < 2:
-        return False
-    if n == 2:
-        return True
-    if n % 2 == 0:
-        return False
-
-    d = 3
-    while d * d <= n:
-        if n % d == 0:
-            return False
-        d += 2
-
-    return True
-
 
 def clasificar_oraculo_por_estados(marcados, n):
     marcados = sorted(marcados)
@@ -209,12 +295,14 @@ def clasificar_oraculo_por_estados(marcados, n):
     if len(marcados) == 0:
         return {
             "tipo": "unknown",
+            "parametro": None,
             "descripcion": "No marca ningun estado"
         }
 
     if len(marcados) == 1:
         return {
             "tipo": "equal",
+            "parametro": marcados[0],
             "descripcion": f"equal({marcados[0]})"
         }
 
@@ -222,6 +310,7 @@ def clasificar_oraculo_por_estados(marcados, n):
         if marcados == list(range(k)):
             return {
                 "tipo": "less",
+                "parametro": k,
                 "descripcion": f"less({k})"
             }
 
@@ -229,6 +318,7 @@ def clasificar_oraculo_por_estados(marcados, n):
         if marcados == list(range(k + 1, N)):
             return {
                 "tipo": "greater",
+                "parametro": k,
                 "descripcion": f"greater({k})"
             }
 
@@ -236,6 +326,7 @@ def clasificar_oraculo_por_estados(marcados, n):
     if marcados == pares:
         return {
             "tipo": "evens",
+            "parametro": None,
             "descripcion": "evens"
         }
 
@@ -243,11 +334,13 @@ def clasificar_oraculo_por_estados(marcados, n):
     if marcados == primos:
         return {
             "tipo": "primes",
+            "parametro": None,
             "descripcion": "primes"
         }
 
     return {
         "tipo": "unknown",
+        "parametro": None,
         "descripcion": "oraculo arbitrario o no clasificado"
     }
 
@@ -311,7 +404,7 @@ def pedir_csv_soluciones():
     root.update()
 
     path = filedialog.askopenfilename(
-        title="Selecciona el archivo CSV con los estados marcados",
+        title="Selecciona el archivo CSV con los estados marcados o el statevector esperado",
         filetypes=[("Archivos CSV", "*.csv")]
     )
 
@@ -349,6 +442,79 @@ def leer_soluciones_desde_csv(path_csv, n):
     return sorted(set(soluciones))
 
 
+def detectar_tipo_csv(path_csv):
+    with open(path_csv, "r", encoding="utf-8") as f:
+        for linea in f:
+            linea = linea.strip()
+            if not linea:
+                continue
+
+            try:
+                int(linea)
+                return "numbers"
+            except ValueError:
+                return "statevector"
+
+    raise ValueError("El CSV esta vacio")
+
+
+def leer_statevector_desde_csv(path_csv, n):
+    amplitudes = []
+
+    with open(path_csv, "r", encoding="utf-8") as f:
+        for linea in f:
+            linea = linea.strip()
+            if not linea:
+                continue
+
+            try:
+                valor = complex(linea.replace("i", "j"))
+            except ValueError:
+                raise ValueError(f"Amplitud no valida en el CSV: '{linea}'")
+
+            amplitudes.append(valor)
+
+    N = 2**n
+
+    if len(amplitudes) != N:
+        raise ValueError(
+            f"El statevector debe tener exactamente {N} amplitudes y tiene {len(amplitudes)}"
+        )
+
+    vector = np.array(amplitudes, dtype=complex)
+
+    norma = np.linalg.norm(vector)
+    if norma < 1e-12:
+        raise ValueError("El statevector del CSV no puede tener norma cero")
+
+    if not np.isclose(norma, 1.0, atol=1e-8):
+        raise ValueError(f"El statevector del CSV no esta normalizado. Norma detectada: {norma}")
+
+    return Statevector(vector)
+
+
+def leer_csv_entrada(path_csv, n):
+    tipo = detectar_tipo_csv(path_csv)
+
+    if tipo == "numbers":
+        soluciones = leer_soluciones_desde_csv(path_csv, n)
+        return {
+            "tipo_csv": "numbers",
+            "soluciones": soluciones,
+            "statevector": None
+        }
+
+    if tipo == "statevector":
+        statevector = leer_statevector_desde_csv(path_csv, n)
+        return {
+            "tipo_csv": "statevector",
+            "soluciones": None,
+            "statevector": statevector
+        }
+
+    raise ValueError("Tipo de CSV no soportado")
+
+
 # =========================
 # COMPARACIONES
 # =========================
@@ -372,6 +538,32 @@ def comparar_statevectors_hasta_fase_global(psi1, psi2, tol=1e-8):
 
     fase = v1[idx] / v2[idx]
     return np.allclose(v1, fase * v2, atol=tol)
+
+
+# =========================
+# ORACULO INTERNO DESDE CLASIFICACION
+# =========================
+
+def construir_oraculo_interno_desde_clasificacion(clasificacion, n):
+    tipo = clasificacion["tipo"]
+    parametro = clasificacion["parametro"]
+
+    if tipo == "equal":
+        return mark_one(parametro, n, name=f"== {parametro}")
+
+    if tipo == "less":
+        return oracle_less(parametro, n, name=f"< {parametro}")
+
+    if tipo == "greater":
+        return oracle_greater(parametro, n, name=f"> {parametro}")
+
+    if tipo == "evens":
+        return oracle_evens(n)
+
+    if tipo == "primes":
+        return oracle_primes(n)
+
+    return None
 
 
 # =========================
@@ -418,41 +610,66 @@ def main():
         return
 
     try:
-        soluciones_csv = leer_soluciones_desde_csv(path_csv, componentes["n"])
+        entrada_csv = leer_csv_entrada(path_csv, componentes["n"])
     except ValueError as e:
         print(f"\nError al leer el CSV: {e}")
         return
 
-    print("\n--- Estados marcados leidos desde el CSV ---")
-    print(soluciones_csv)
-
-    marcados_detectados = componentes["marcados_detectados"]
-
-    if comparar_soluciones_detectadas_con_csv(marcados_detectados, soluciones_csv):
-        print("\n✅ El oraculo del QASM coincide con los estados del CSV")
-    else:
-        print("\n❌ El oraculo del QASM NO coincide con los estados del CSV")
-
-    psi_in = componentes["psi_in"]
     psi_out_usuario = componentes["psi_out"]
 
-    psi_out_esperado = obtener_vector_esperado_desde_csv(
-        psi_in,
-        soluciones_csv,
-        componentes["n"]
-    )
+    if entrada_csv["tipo_csv"] == "numbers":
+        soluciones_csv = entrada_csv["soluciones"]
 
-    print("\n--- Vector de estado esperado segun el CSV ---")
-    print(psi_out_esperado)
+        print("\n--- CSV interpretado como lista de estados marcados ---")
+        print(soluciones_csv)
 
-    if comparar_statevectors_hasta_fase_global(psi_out_usuario, psi_out_esperado):
-        print("\n✅ El vector final del oraculo coincide con el esperado (salvo fase global)")
-    else:
-        print("\n❌ El vector final del oraculo NO coincide con el esperado")
+        marcados_detectados = componentes["marcados_detectados"]
+
+        if comparar_soluciones_detectadas_con_csv(marcados_detectados, soluciones_csv):
+            print("\n✅ El oraculo del QASM coincide con los estados del CSV")
+        else:
+            print("\n❌ El oraculo del QASM NO coincide con los estados del CSV")
+
+        psi_in = componentes["psi_in"]
+        psi_out_esperado = obtener_vector_esperado_desde_csv(
+            psi_in,
+            soluciones_csv,
+            componentes["n"]
+        )
+
+        print("\n--- Vector de estado esperado segun el CSV ---")
+        print(psi_out_esperado)
+
+        if comparar_statevectors_hasta_fase_global(psi_out_usuario, psi_out_esperado):
+            print("\n✅ El vector final del oraculo coincide con el esperado (salvo fase global)")
+        else:
+            print("\n❌ El vector final del oraculo NO coincide con el esperado")
+
+    elif entrada_csv["tipo_csv"] == "statevector":
+        psi_out_esperado = entrada_csv["statevector"]
+
+        print("\n--- CSV interpretado como statevector esperado ---")
+        print(psi_out_esperado)
+
+        if comparar_statevectors_hasta_fase_global(psi_out_usuario, psi_out_esperado):
+            print("\n✅ El vector final del oraculo coincide con el statevector del CSV (salvo fase global)")
+        else:
+            print("\n❌ El vector final del oraculo NO coincide con el statevector del CSV")
 
     print("\n--- Resumen final del oraculo del circuito ---")
     print(f"Tipo detectado por comportamiento: {componentes['clasificacion_oraculo']['tipo']}")
     print(f"Descripcion: {componentes['clasificacion_oraculo']['descripcion']}")
+
+    oraculo_interno = construir_oraculo_interno_desde_clasificacion(
+        componentes["clasificacion_oraculo"],
+        componentes["n"]
+    )
+
+    if oraculo_interno is not None:
+        componentes["oraculo_interno"] = oraculo_interno
+        print("✅ Se ha construido el oraculo interno correspondiente para usarlo despues en Grover")
+    else:
+        print("⚠️ No se ha podido asociar un oraculo interno especifico; se tratara como oraculo arbitrario")
 
 
 if __name__ == "__main__":
