@@ -2,7 +2,8 @@ from qiskit import QuantumCircuit
 from qiskit.quantum_info import Statevector
 from qiskit.circuit.library import MCXGate
 from qiskit.qasm2 import loads, LEGACY_CUSTOM_INSTRUCTIONS
-
+import math
+import matplotlib.pyplot as plt
 import numpy as np
 import tkinter as tk
 from tkinter import filedialog
@@ -32,6 +33,73 @@ def construir_subcircuito_desde_ops(ops, n):
         qargs = [qindex(q) for q in instr.qubits]
         sub_qc.append(instr.operation, qargs, [])
     return sub_qc
+
+def diffuser(qc, n):
+    qc.h(range(n))
+    qc.x(range(n))
+
+    qc.h(n - 1)
+    qc.append(MCXGate(n - 1), list(range(n)))
+    qc.h(n - 1)
+
+    qc.x(range(n))
+    qc.h(range(n))
+
+def optimal_iterations(n, M):
+    N = 2**n
+
+    if M == 0:
+        return 0
+
+    return int(np.floor((np.pi / 4) * np.sqrt(N / M)))
+
+def analyze_grover_with_internal_oracle(n, oracle_circuit, solution_indices):
+    qc = QuantumCircuit(n)
+
+    states = []
+    labels = []
+
+    state = Statevector.from_instruction(qc)
+    print("\n--- Estado inicial |0...0> ---")
+    print(state)
+    states.append(state)
+    labels.append("init")
+
+    qc.h(range(n))
+    state = Statevector.from_instruction(qc)
+    print("\n--- Estado |s> ---")
+    print(state)
+    states.append(state)
+    labels.append("|s>")
+
+    M = len(solution_indices)
+    print("\nNumero de soluciones (M):", M)
+    print("Soluciones:", solution_indices)
+
+    iterations = optimal_iterations(n, M)
+    print("Numero de iteraciones de Grover:", iterations)
+
+    if iterations == 0:
+        print("El numero de soluciones es alto respecto al espacio de busqueda.")
+        print("El numero optimo de iteraciones de Grover resulta ser 0.")
+        return states, labels
+
+    for i in range(iterations):
+        qc.append(oracle_circuit.to_gate(), list(range(n)))
+        state = Statevector.from_instruction(qc)
+        print(f"\n--- Estado tras Oraculo {i + 1} ---")
+        print(state)
+        states.append(state)
+        labels.append(f"O_{i+1}")
+
+        diffuser(qc, n)
+        state = Statevector.from_instruction(qc)
+        print(f"\n--- Estado tras Difusor {i + 1} ---")
+        print(state)
+        states.append(state)
+        labels.append(f"D_{i+1}")
+
+    return states, labels
 
 
 # =========================
@@ -570,6 +638,53 @@ def construir_oraculo_interno_desde_clasificacion(clasificacion, n):
 # FLUJO PRINCIPAL
 # =========================
 
+def analyze_grover_with_internal_oracle(n, oracle_circuit, solution_indices):
+    qc = QuantumCircuit(n)
+
+    states = []
+    labels = []
+
+    state = Statevector.from_instruction(qc)
+    print("\n--- Estado inicial |0...0> ---")
+    print(state)
+    states.append(state)
+    labels.append("init")
+
+    qc.h(range(n))
+    state = Statevector.from_instruction(qc)
+    print("\n--- Estado |s> ---")
+    print(state)
+    states.append(state)
+    labels.append("|s>")
+
+    M = len(solution_indices)
+    print("\nNumero de soluciones (M):", M)
+    print("Soluciones:", solution_indices)
+
+    iterations = optimal_iterations(n, M)
+    print("Numero de iteraciones de Grover:", iterations)
+
+    if iterations == 0:
+        print("No hay iteraciones interesantes")
+        return states, labels
+
+    for i in range(iterations):
+        qc.append(oracle_circuit.to_gate(), list(range(n)))
+        state = Statevector.from_instruction(qc)
+        print(f"\n--- Estado tras Oraculo {i + 1} ---")
+        print(state)
+        states.append(state)
+        labels.append(f"O_{i+1}")
+
+        diffuser(qc, n)
+        state = Statevector.from_instruction(qc)
+        print(f"\n--- Estado tras Difusor {i + 1} ---")
+        print(state)
+        states.append(state)
+        labels.append(f"D_{i+1}")
+
+    return states, labels
+
 def obtener_qasm_y_vectores():
     path = pedir_qasm()
     if path is None:
@@ -595,6 +710,239 @@ def obtener_qasm_y_vectores():
     componentes["path_qasm"] = path
 
     return componentes
+
+# REPRESENTACION
+
+def build_grover_basis(n, solution_indices):
+    N = 2**n
+
+    ket_t = np.zeros(N, dtype=complex)
+    for index in solution_indices:
+        ket_t[index] = 1.0
+
+    if np.linalg.norm(ket_t) > 1e-12:
+        ket_t /= np.linalg.norm(ket_t)
+
+    ket_r = np.ones(N, dtype=complex)
+    for index in solution_indices:
+        ket_r[index] = 0.0
+
+    if np.linalg.norm(ket_r) > 1e-12:
+        ket_r /= np.linalg.norm(ket_r)
+
+    return ket_r, ket_t
+
+
+def project_state(statevector, solution_indices, n):
+    amps = statevector.data
+    ket_r, ket_t = build_grover_basis(n, solution_indices)
+
+    c_r = np.vdot(ket_r, amps)
+    c_t = np.vdot(ket_t, amps)
+
+    if abs(c_r) > 1e-12:
+        phase = np.exp(-1j * np.angle(c_r))
+        c_r *= phase
+        c_t *= phase
+
+    return c_r.real, c_t.real
+
+def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Evolución de Grover"):
+    iterations = (len(states) - 2) // 2
+
+    if iterations <= 0:
+        print("No hay iteraciones para representar.")
+        return
+
+    points = [project_state(s, solution_indices, n) for s in states]
+
+    for iteration_number in range(1, iterations + 1):
+        print(f"\nMostrando iteración {iteration_number} de {iterations}.")
+        print("Cierra la ventana de la gráfica para continuar con la siguiente iteración.")
+
+        fig, ax = plt.subplots(figsize=(13, 8))
+        draw_single_iteration(ax, points, labels, iteration_number)
+
+        fig.suptitle(
+            f"{titulo} | Iteración {iteration_number}",
+            fontsize=22,
+            fontweight="bold"
+        )
+
+        # Mensaje FUERA de la gráfica, abajo
+        fig.text(
+            0.5,
+            0.03,
+            "Cierra esta ventana para pasar a la siguiente iteración",
+            ha="center",
+            va="center",
+            fontsize=12,
+            bbox=dict(boxstyle="round,pad=0.35", facecolor="white", edgecolor="#cccccc")
+        )
+
+        plt.subplots_adjust(
+            left=0.08,
+            right=0.76,
+            top=0.88,
+            bottom=0.12
+        )
+
+        plt.show()
+
+
+def draw_single_iteration(ax, points, labels, iteration_number):
+    start_idx = 1 if iteration_number == 1 else 2 * iteration_number - 1
+    oracle_idx = 2 * iteration_number
+    diffuser_idx = 2 * iteration_number + 1
+
+    x_start, y_start = points[start_idx]
+    x_oracle, y_oracle = points[oracle_idx]
+    x_diff, y_diff = points[diffuser_idx]
+
+    label_start = labels[start_idx]
+    label_oracle = labels[oracle_idx]
+    label_diff = labels[diffuser_idx]
+
+    color_start = "green"
+    color_oracle = "red"
+    color_diff = "blue"
+    color_ref_oracle = "#ff9896"
+    color_ref_diff = "#9ecae1"
+
+    ax.set_facecolor("#fafafa")
+
+    ax.axhline(0, linewidth=1.5, color="black")
+    ax.axvline(0, linewidth=1.5, color="black")
+
+    ax.quiver(
+        0, 0, 1, 0,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        linestyle="dashed",
+        color="black",
+        width=0.004
+    )
+    ax.text(1.04, 0.03, "|r⟩", fontsize=16, fontweight="bold")
+
+    ax.quiver(
+        0, 0, 0, 1,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        linestyle="dashed",
+        color="black",
+        width=0.004
+    )
+    ax.text(0.03, 1.04, "|t⟩", fontsize=16, fontweight="bold")
+
+    ax.plot(
+        [x_start, x_oracle],
+        [y_start, y_oracle],
+        linestyle="--",
+        linewidth=3,
+        color=color_ref_oracle,
+        alpha=0.95,
+        zorder=2
+    )
+    ax.plot(
+        [x_oracle, x_diff],
+        [y_oracle, y_diff],
+        linestyle="--",
+        linewidth=3,
+        color=color_ref_diff,
+        alpha=0.95,
+        zorder=2
+    )
+
+    ax.quiver(
+        0, 0, x_start, y_start,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        color=color_start,
+        width=0.008,
+        alpha=0.95,
+        zorder=3
+    )
+    ax.quiver(
+        0, 0, x_oracle, y_oracle,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        color=color_oracle,
+        width=0.008,
+        alpha=0.95,
+        zorder=4
+    )
+    ax.quiver(
+        0, 0, x_diff, y_diff,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        color=color_diff,
+        width=0.008,
+        alpha=0.95,
+        zorder=5
+    )
+
+    ax.scatter([x_start], [y_start], color=color_start, s=120, edgecolors="black", linewidths=0.8, zorder=6)
+    ax.scatter([x_oracle], [y_oracle], color=color_oracle, s=120, edgecolors="black", linewidths=0.8, zorder=6)
+    ax.scatter([x_diff], [y_diff], color=color_diff, s=120, edgecolors="black", linewidths=0.8, zorder=6)
+
+    ax.annotate(
+        label_start,
+        (x_start, y_start),
+        textcoords="offset points",
+        xytext=(12, 12),
+        fontsize=13,
+        fontweight="bold",
+        color=color_start
+    )
+    ax.annotate(
+        label_oracle,
+        (x_oracle, y_oracle),
+        textcoords="offset points",
+        xytext=(12, -18),
+        fontsize=13,
+        fontweight="bold",
+        color=color_oracle
+    )
+    ax.annotate(
+        label_diff,
+        (x_diff, y_diff),
+        textcoords="offset points",
+        xytext=(12, 12),
+        fontsize=13,
+        fontweight="bold",
+        color=color_diff
+    )
+
+    ax.set_title(f"Iteración {iteration_number}", fontsize=20, fontweight="bold")
+    ax.set_xlim(-1.2, 1.2)
+    ax.set_ylim(-1.2, 1.2)
+    ax.set_aspect("equal")
+    ax.grid(alpha=0.3, linestyle=":")
+
+    handles = [
+        plt.Line2D([0], [0], color=color_start, lw=3, label="Estado de partida"),
+        plt.Line2D([0], [0], color=color_oracle, lw=3, label="Tras oráculo"),
+        plt.Line2D([0], [0], color=color_diff, lw=3, label="Tras difusor"),
+        plt.Line2D([0], [0], color=color_ref_oracle, lw=3, linestyle="--", label="Reflexión del oráculo"),
+        plt.Line2D([0], [0], color=color_ref_diff, lw=3, linestyle="--", label="Reflexión sobre la media"),
+        plt.Line2D([0], [0], color="black", lw=2, linestyle="dashed", label="|r⟩ = superposición de no-soluciones"),
+        plt.Line2D([0], [0], color="black", lw=2, linestyle="dashed", label="|t⟩ = superposición de soluciones"),
+    ]
+
+    ax.legend(
+        handles=handles,
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        fontsize=10,
+        frameon=True,
+        title="Leyenda",
+        title_fontsize=12
+    )
 
 
 def main():
@@ -668,6 +1016,29 @@ def main():
     if oraculo_interno is not None:
         componentes["oraculo_interno"] = oraculo_interno
         print("✅ Se ha construido el oraculo interno correspondiente para usarlo despues en Grover")
+
+        if entrada_csv["tipo_csv"] == "numbers":
+            solution_indices = entrada_csv["soluciones"]
+        else:
+            solution_indices = componentes["marcados_detectados"]
+
+        states, labels = analyze_grover_with_internal_oracle(
+            componentes["n"],
+            oraculo_interno,
+            solution_indices
+        )
+
+        componentes["grover_states"] = states
+        componentes["grover_labels"] = labels
+
+        if len(states) > 2:
+            plot_grover_by_iteration(
+                states,
+                labels,
+                componentes["n"],
+                solution_indices,
+                titulo=f"Evolucion de Grover | {componentes['clasificacion_oraculo']['descripcion']}"
+            )
     else:
         print("⚠️ No se ha podido asociar un oraculo interno especifico; se tratara como oraculo arbitrario")
 
