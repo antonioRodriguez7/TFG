@@ -1,15 +1,146 @@
 from qiskit import QuantumCircuit
 from qiskit.quantum_info import Statevector
-import numpy as np
-import matplotlib.pyplot as plt
 from qiskit.circuit.library import MCXGate
-import tkinter as tk
-from tkinter import filedialog, simpledialog, messagebox
 from qiskit.qasm2 import loads, LEGACY_CUSTOM_INSTRUCTIONS
 
-# =========================
-# ORÁCULOS REALES
-# =========================
+import numpy as np
+import matplotlib.pyplot as plt
+import tkinter as tk
+from tkinter import filedialog, simpledialog, messagebox
+
+import math
+import json
+import os
+import sys
+import subprocess
+
+# #########################
+# CONFIGURACION
+# #########################
+
+GENERAR_GRAFICAS = False
+GENERAR_VIDEO_MANIM = False
+
+MANIM_QUALITY = "-pql"   # -pql, -pqm, -pqh
+MANIM_DATA_FILE = "grover_manim_data.json"
+
+try:
+    from manim import *
+    MANIM_AVAILABLE = True
+except ImportError:
+    MANIM_AVAILABLE = False
+
+
+# #########################
+# ESCENA MANIM
+# #########################
+
+if MANIM_AVAILABLE:
+    class GroverScene(Scene):
+        def construct(self):
+            if not os.path.exists(MANIM_DATA_FILE):
+                raise FileNotFoundError(f"No existe {MANIM_DATA_FILE}")
+
+            with open(MANIM_DATA_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            points = data["points"]
+            labels = data["labels"]
+            title_text = data["title"]
+            iterations = data["iterations"]
+
+            plane = NumberPlane(
+                x_range=[-1.2, 1.2, 0.5],
+                y_range=[-1.2, 1.2, 0.5],
+                x_length=8,
+                y_length=8,
+                background_line_style={"stroke_opacity": 0.25}
+            )
+
+            origin = plane.c2p(0, 0)
+
+            title = Text(title_text, font_size=28).to_edge(UP)
+            self.play(Write(title))
+            self.play(Create(plane))
+
+            eje_r = Arrow(origin, plane.c2p(1, 0), buff=0, color=WHITE)
+            eje_t = Arrow(origin, plane.c2p(0, 1), buff=0, color=WHITE)
+
+            label_r = Text("|r>", font_size=24).next_to(plane.c2p(1, 0), RIGHT, buff=0.12)
+            label_t = Text("|t>", font_size=24).next_to(plane.c2p(0, 1), UP, buff=0.12)
+
+            self.play(Create(eje_r), Create(eje_t), Write(label_r), Write(label_t))
+
+            legend_1 = Text("Verde: estado de partida", font_size=20).to_corner(UL).shift(DOWN * 0.8)
+            legend_2 = Text("Rojo: oraculo", font_size=20).next_to(legend_1, DOWN, aligned_edge=LEFT)
+            legend_3 = Text("Azul: difusor", font_size=20).next_to(legend_2, DOWN, aligned_edge=LEFT)
+
+            self.play(Write(legend_1), Write(legend_2), Write(legend_3))
+
+            current_group = None
+            current_iter_text = None
+
+            for i in range(1, iterations + 1):
+                start_idx = 1 if i == 1 else 2 * i - 1
+                oracle_idx = 2 * i
+                diffuser_idx = 2 * i + 1
+
+                start_x, start_y = points[start_idx]
+                oracle_x, oracle_y = points[oracle_idx]
+                diff_x, diff_y = points[diffuser_idx]
+
+                start_label = labels[start_idx]
+                oracle_label = labels[oracle_idx]
+                diff_label = labels[diffuser_idx]
+
+                start_p = plane.c2p(start_x, start_y)
+                oracle_p = plane.c2p(oracle_x, oracle_y)
+                diff_p = plane.c2p(diff_x, diff_y)
+
+                start_arrow = Arrow(origin, start_p, buff=0, color=GREEN, stroke_width=6)
+                oracle_arrow = Arrow(origin, oracle_p, buff=0, color=RED, stroke_width=6)
+                diff_arrow = Arrow(origin, diff_p, buff=0, color=BLUE, stroke_width=6)
+
+                start_dot = Dot(start_p, color=GREEN, radius=0.05)
+                oracle_dot = Dot(oracle_p, color=RED, radius=0.05)
+                diff_dot = Dot(diff_p, color=BLUE, radius=0.05)
+
+                start_text = Text(start_label, font_size=20).next_to(start_p, UR, buff=0.08)
+                oracle_text = Text(oracle_label, font_size=20).next_to(oracle_p, UR, buff=0.08)
+                diff_text = Text(diff_label, font_size=20).next_to(diff_p, UR, buff=0.08)
+
+                seg_oracle = DashedLine(start_p, oracle_p, color=RED)
+                seg_diff = DashedLine(oracle_p, diff_p, color=BLUE)
+
+                iter_text = Text(f"Iteracion {i}", font_size=24).to_edge(DOWN)
+
+                group = VGroup(
+                    start_arrow, start_dot, start_text,
+                    oracle_arrow, oracle_dot, oracle_text,
+                    diff_arrow, diff_dot, diff_text,
+                    seg_oracle, seg_diff
+                )
+
+                if current_group is not None:
+                    self.play(FadeOut(current_group), FadeOut(current_iter_text), run_time=0.5)
+
+                self.play(FadeIn(iter_text), run_time=0.3)
+                self.play(Create(start_arrow), FadeIn(start_dot), Write(start_text), run_time=0.8)
+                self.wait(0.35)
+                self.play(Create(oracle_arrow), FadeIn(oracle_dot), Write(oracle_text), Create(seg_oracle), run_time=0.8)
+                self.wait(0.35)
+                self.play(Create(diff_arrow), FadeIn(diff_dot), Write(diff_text), Create(seg_diff), run_time=0.8)
+                self.wait(1.0)
+
+                current_group = group
+                current_iter_text = iter_text
+
+            self.wait(2)
+
+
+# #########################
+# ORACULOS REALES
+# #########################
 
 def mark_one(number, nqubits, name=None):
     if isinstance(number, str):
@@ -24,7 +155,7 @@ def mark_one(number, nqubits, name=None):
             circuit.x(i)
 
     circuit.h(nqubits - 1)
-    circuit.mcx(list(range(nqubits - 1)), nqubits - 1)
+    circuit.append(MCXGate(nqubits - 1), list(range(nqubits)))
     circuit.h(nqubits - 1)
 
     for i, bit in enumerate(reversed(binary)):
@@ -101,34 +232,32 @@ def oracle_greater(number, nqubits, name=None):
     return circuit
 
 
-# =========================
+# #########################
 # DIFUSOR
-# =========================
+# #########################
 
 def diffuser(qc, n):
     qc.h(range(n))
     qc.x(range(n))
 
     qc.h(n - 1)
-    qc.mcx(list(range(n - 1)), n - 1, mode="noancilla")
+    qc.append(MCXGate(n - 1), list(range(n)))
     qc.h(n - 1)
 
     qc.x(range(n))
     qc.h(range(n))
 
 
-# =========================
+# #########################
 # ESTADO
-# =========================
-
+# #########################
 def get_state(qc):
     return Statevector.from_instruction(qc)
 
 
-# =========================
+# #########################
 # BASE DE GROVER
-# =========================
-
+# #########################
 def build_grover_basis(n, solution_indices):
     N = 2**n
 
@@ -162,10 +291,9 @@ def project_state(statevector, solution_indices, n):
     return c_r.real, c_t.real
 
 
-# =========================
+# #########################
 # SOLUCIONES
-# =========================
-
+# #########################
 def get_solution_indices(choice, number, n):
     N = 2**n
 
@@ -186,71 +314,130 @@ def optimal_iterations(n, M):
     return int(np.floor((np.pi / 4) * np.sqrt(N / M)))
 
 
-# =========================
-# VISUALIZACIÓN
-# =========================
+# #########################
+# GRAFICAS ESTATICAS
+# #########################
 
-def plot_grover_step_by_step(states, labels, n, solutions):
-    if len(states) < 4:
-        print("No hay suficientes estados para representar.")
+
+def draw_iteration_subplot(ax, points, labels, iteration_number):
+    start_idx = 1 if iteration_number == 1 else 2 * iteration_number - 1
+    oracle_idx = 2 * iteration_number
+    diffuser_idx = 2 * iteration_number + 1
+
+    x_start, y_start = points[start_idx]
+    x_oracle, y_oracle = points[oracle_idx]
+    x_diff, y_diff = points[diffuser_idx]
+
+    label_start = labels[start_idx]
+    label_oracle = labels[oracle_idx]
+    label_diff = labels[diffuser_idx]
+
+    ax.axhline(0, linewidth=1.2, color="black")
+    ax.axvline(0, linewidth=1.2, color="black")
+
+    ax.quiver(0, 0, 1, 0, angles="xy", scale_units="xy", scale=1,
+              linestyle='dashed', color="black")
+    ax.text(1.05, 0, "|r>", fontsize=11)
+
+    ax.quiver(0, 0, 0, 1, angles="xy", scale_units="xy", scale=1,
+              linestyle='dashed', color="black")
+    ax.text(0, 1.05, "|t>", fontsize=11)
+
+    # Flecha de partida
+    ax.quiver(0, 0, x_start, y_start, angles="xy", scale_units="xy", scale=1,
+              color="green", width=0.006, alpha=0.9)
+    ax.scatter([x_start], [y_start], color="green", s=35)
+    ax.text(x_start + 0.03, y_start + 0.03, label_start, fontsize=9, color="green")
+
+    # Flecha oraculo
+    ax.quiver(0, 0, x_oracle, y_oracle, angles="xy", scale_units="xy", scale=1,
+              color="red", width=0.006, alpha=0.9)
+    ax.scatter([x_oracle], [y_oracle], color="red", s=35)
+    ax.text(x_oracle + 0.03, y_oracle + 0.03, label_oracle, fontsize=9, color="red")
+
+    # Flecha difusor
+    ax.quiver(0, 0, x_diff, y_diff, angles="xy", scale_units="xy", scale=1,
+              color="blue", width=0.006, alpha=0.9)
+    ax.scatter([x_diff], [y_diff], color="blue", s=35)
+    ax.text(x_diff + 0.03, y_diff + 0.03, label_diff, fontsize=9, color="blue")
+
+    # Segmentos de la reflexion de esta iteracion
+    ax.plot([x_start, x_oracle], [y_start, y_oracle], linestyle="--", linewidth=1.8, color="red", alpha=0.8)
+    ax.plot([x_oracle, x_diff], [y_oracle, y_diff], linestyle="--", linewidth=1.8, color="blue", alpha=0.8)
+
+    ax.set_title(f"Iteracion {iteration_number}", fontsize=12)
+    ax.set_xlim(-1.2, 1.2)
+    ax.set_ylim(-1.2, 1.2)
+    ax.set_aspect("equal")
+    ax.grid(alpha=0.3)
+
+
+def plot_grover_by_iteration(states, labels, n, solutions, choice, number):
+    iterations = (len(states) - 2) // 2
+
+    if iterations <= 0:
+        print("No hay iteraciones para representar.")
         return
 
-    num_plots = (len(states) - 2) // 2
-    fig, axes = plt.subplots(1, num_plots, figsize=(5 * num_plots, 5))
+    points = [project_state(s, solutions, n) for s in states]
 
-    if num_plots == 1:
+    ncols = min(3, iterations)
+    nrows = math.ceil(iterations / 3)
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows))
+
+    if isinstance(axes, np.ndarray):
+        axes = axes.ravel()
+    else:
         axes = [axes]
 
-    plot_idx = 0
+    for i in range(1, iterations + 1):
+        draw_iteration_subplot(axes[i - 1], points, labels, i)
 
-    for k in range(4, len(states) + 1, 2):
-        ax = axes[plot_idx]
-        plot_idx += 1
+    for j in range(iterations, len(axes)):
+        axes[j].axis("off")
 
-        partial_states = states[:k]
-        partial_labels = labels[:k]
+    fig.suptitle(
+        f"Evolucion de Grover por iteraciones | tipo={choice}, numero={number}, qubits={n}",
+        fontsize=15
+    )
 
-        points = [project_state(s, solutions, n) for s in partial_states]
-        xs = [p[0] for p in points]
-        ys = [p[1] for p in points]
-
-        ax.axhline(0, linewidth=1.2)
-        ax.axvline(0, linewidth=1.2)
-
-        ax.quiver(0, 0, 1, 0, angles="xy", scale_units="xy", scale=1, linestyle='dashed', color="black")
-        ax.text(1.05, 0, "|r⟩", fontsize=12)
-
-        ax.quiver(0, 0, 0, 1, angles="xy", scale_units="xy", scale=1, linestyle='dashed', color="black")
-        ax.text(0, 1.05, "|t⟩", fontsize=12)
-
-        for (x, y), label in zip(points[1:], partial_labels[1:]):
-            color = "black"
-            if "O" in label:
-                color = "red"
-            elif "D" in label:
-                color = "blue"
-            elif label == "|s⟩":
-                color = "green"
-
-            ax.quiver(0, 0, x, y, angles="xy", scale_units="xy", scale=1, color=color, width=0.006, alpha=0.85)
-            ax.text(x + 0.04, y + 0.04, label, fontsize=9)
-
-        ax.plot(xs, ys, linestyle="--", linewidth=2, marker="o", color="gray")
-
-        iteracion = (k // 2) - 1
-        ax.set_title(f"Iter {iteracion}")
-        ax.set_xlim(-1.2, 1.2)
-        ax.set_ylim(-1.2, 1.2)
-        ax.set_aspect('equal')
-        ax.grid(alpha=0.3)
-
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.show()
 
 
-# =========================
-# ANALIZAR GROVER REAL
-# =========================
+# #########################
+# EXPORTAR DATOS PARA MANIM
+# #########################
+
+def exportar_datos_manim(states, labels, n, solutions, choice, number):
+    points = [project_state(s, solutions, n) for s in states]
+    iterations = (len(states) - 2) // 2
+
+    data = {
+        "points": [[float(x), float(y)] for x, y in points],
+        "labels": labels,
+        "iterations": iterations,
+        "title": f"Grover: tipo={choice}, numero={number}, qubits={n}"
+    }
+
+    with open(MANIM_DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+
+
+def renderizar_con_manim():
+    if not MANIM_AVAILABLE:
+        print("Manim no está instalado.")
+        print("Instalalo con: pip install manim")
+        return
+
+    comando = [sys.executable, "-m", "manim", MANIM_QUALITY, __file__, "GroverScene"]
+    subprocess.run(comando)
+
+
+# #########################
+# ANALIZAR GROVER
+# #########################
 
 def analyze_grover(n, number, choice):
     qc = QuantumCircuit(n)
@@ -259,17 +446,17 @@ def analyze_grover(n, number, choice):
     labels = []
 
     state = get_state(qc)
-    print("\n--- Estado inicial |0...0⟩ ---")
+    print("\n--- Estado inicial |0...0> ---")
     print(state)
     states.append(state)
     labels.append("init")
 
     qc.h(range(n))
     state = get_state(qc)
-    print("\n--- Estado |s⟩ ---")
+    print("\n--- Estado |s> ---")
     print(state)
     states.append(state)
-    labels.append("|s⟩")
+    labels.append("|s>")
 
     if choice == "one":
         oracle_circuit = mark_one(number, n)
@@ -281,16 +468,17 @@ def analyze_grover(n, number, choice):
         oracle_circuit = oracle_greater(number, n)
         oracle_label = f"> {number}"
     else:
-        print("Tipo de oráculo no soportado")
+        print("Tipo de oraculo no soportado")
         return [], []
 
     solutions = get_solution_indices(choice, number, n)
     M = len(solutions)
 
-    print("\nNúmero de soluciones (M):", M)
+    print("\nNumero de soluciones (M):", M)
+    print("Soluciones:", solutions)
 
     iterations = optimal_iterations(n, M)
-    print("Número de iteraciones:", iterations)
+    print("Numero de iteraciones:", iterations)
 
     if iterations == 0:
         print("No hay iteraciones interesantes")
@@ -299,31 +487,31 @@ def analyze_grover(n, number, choice):
     for i in range(iterations):
         qc.append(oracle_circuit.to_gate(), list(range(n)))
         state = get_state(qc)
-        print(f"\n--- Estado tras Oráculo {i+1} ({oracle_label}) ---")
+        print(f"\n--- Estado tras Oraculo {i+1} ({oracle_label}) ---")
         print(state)
         states.append(state)
-        labels.append(rf"$O_{{{i+1}}}$")
+        labels.append(f"O_{i+1}")
 
         diffuser(qc, n)
         state = get_state(qc)
         print(f"\n--- Estado tras Difusor {i+1} ---")
         print(state)
         states.append(state)
-        labels.append(rf"$D_{{{i+1}}}$")
+        labels.append(f"D_{i+1}")
 
     return states, labels
 
 
-# =========================
-# UTILIDADES DE ANÁLISIS DEL QASM
-# =========================
+# #########################
+# UTILIDADES DE ANALISIS DEL QASM
+# #########################
 
 def qindex(q):
     if hasattr(q, "_index"):
         return q._index
     return q.index
 
-
+# Convertimos nuestro circuito QASM a QuantumCircuit de Qiskit para analizarlo
 def cargar_circuito(path):
     with open(path, "r") as f:
         return loads(
@@ -331,7 +519,7 @@ def cargar_circuito(path):
             custom_instructions=LEGACY_CUSTOM_INSTRUCTIONS
         )
 
-
+# Pedimos al usuario que introduzca un numero valido para el tipo de oraculo detectado
 def pedir_numero_valido(n):
     root = tk.Tk()
     root.withdraw()
@@ -341,7 +529,7 @@ def pedir_numero_valido(n):
     while True:
         numero = simpledialog.askinteger(
             "Entrada",
-            f"Introduce la solución (0 - {max_val}):"
+            f"Introduce la solucion (0 - {max_val}):"
         )
 
         if numero is None:
@@ -350,34 +538,38 @@ def pedir_numero_valido(n):
         if 0 <= numero <= max_val:
             return numero
         else:
-            messagebox.showerror("Error", f"Número fuera de rango (0 - {max_val})")
+            messagebox.showerror("Error", f"Numero fuera de rango (0 - {max_val})")
 
-
+# Comprobamos que todos los qubits empiezan con una puerta Hadamart
 def es_capa_h_inicial(qc):
     n = qc.num_qubits
     if len(qc.data) < n:
         return False
 
     primeras = qc.data[:n]
+    # Aqui comprobamos que todas las primeras n sean puertas h
     if not all(instr.operation.name == "h" for instr in primeras):
         return False
 
     qubits = [qindex(instr.qubits[0]) for instr in primeras]
     return sorted(qubits) == list(range(n))
 
-
+# Este metodo tiene como objetivo detectar un patrón de inicio de difusor
 def detectar_inicio_difusor(qc):
+    # Sacamos el numero de operaciones del circuito
     ops = qc.data
     n = qc.num_qubits
     total = len(ops)
 
     for i in range(n, total):
-        if i + 2*n + 3 > total:
+        if i + 2 * n + 3 > total:
             break
 
         bloque_h = ops[i:i+n]
         bloque_x = ops[i+n:i+2*n]
 
+        # Reccoremos todo el circuito buscando en cada posición si hay n Hadamartas seguidas de n puertas X,
+        # tras esto comprobamos que actuan sobre todos los qubits, y si lo encuentro devuelve la posicion de inicio
         if not all(instr.operation.name == "h" for instr in bloque_h):
             continue
         if not all(instr.operation.name == "x" for instr in bloque_x):
@@ -393,7 +585,7 @@ def detectar_inicio_difusor(qc):
 
     return None
 
-
+# Este metodo se encarga de extraer el bloque de operaciones que corresponde al oraculo
 def extraer_bloque_oraculo(qc):
     if not es_capa_h_inicial(qc):
         return None
@@ -403,65 +595,19 @@ def extraer_bloque_oraculo(qc):
         return None
 
     n = qc.num_qubits
+    # Cogemos la informacion desde n hasta el inicio del difusor
     oracle_ops = qc.data[n:inicio_difusor]
 
     oracle_qc = QuantumCircuit(n)
     for instr in oracle_ops:
+        # Recorremos indices de los qubits sobre los tu actua la instruccion
         qargs = [qindex(q) for q in instr.qubits]
-        cargs = []
-        oracle_qc.append(instr.operation, qargs, cargs)
+        # Aniadimos la instruccion al circuito del oraculo con los qubits corregidos
+        oracle_qc.append(instr.operation, qargs, [])
 
     return oracle_qc
 
-
-def es_patron_equal(oracle_qc):
-    ops = oracle_qc.data
-    if len(ops) != 3:
-        return False
-
-    n1 = ops[0].operation.name
-    n2 = ops[1].operation.name
-    n3 = ops[2].operation.name
-
-    if n1 != "h" or n3 != "h":
-        return False
-
-    if n2 not in ("ccx", "mcx"):
-        return False
-
-    t1 = qindex(ops[0].qubits[0])
-    t3 = qindex(ops[2].qubits[0])
-
-    if t1 != t3:
-        return False
-
-    return True
-
-
-def es_patron_less(oracle_qc):
-    ops = oracle_qc.data
-    if len(ops) != 3:
-        return False
-
-    n1 = ops[0].operation.name
-    n2 = ops[1].operation.name
-    n3 = ops[2].operation.name
-
-    if n1 != "x" or n3 != "x":
-        return False
-
-    if n2 not in ("ccx", "mcx"):
-        return False
-
-    t1 = qindex(ops[0].qubits[0])
-    t3 = qindex(ops[2].qubits[0])
-
-    if t1 != t3:
-        return False
-
-    return True
-
-
+# Detectamos que tipo de oraculo tenemos
 def detectar_tipo_oraculo_desde_qasm(qc):
     oracle_qc = extraer_bloque_oraculo(qc)
     if oracle_qc is None:
@@ -490,7 +636,8 @@ def detectar_tipo_oraculo_desde_qasm(qc):
 
     return None
 
-def obtener_parametros_desde_qasm():
+
+def obtener_qasm_y_vectores():
     root = tk.Tk()
     root.withdraw()
     root.update()
@@ -503,59 +650,263 @@ def obtener_parametros_desde_qasm():
     root.destroy()
 
     if not path:
-        print("No se seleccionó archivo")
+        print("No se selecciono archivo")
         return None
 
     qc = cargar_circuito(path)
-    n = qc.num_qubits
 
     if not es_capa_h_inicial(qc):
-        print("El circuito no empieza con una superposición uniforme de Grover")
+        print("El circuito no empieza con una superposicion uniforme de Grover")
         return None
 
     if detectar_inicio_difusor(qc) is None:
         print("No se ha detectado un difusor con estructura de Grover")
         return None
 
-    number = pedir_numero_valido(n)
-    if number is None:
-        print("Entrada cancelada")
+    componentes = obtener_vectores_oraculo_usuario(qc)
+    if componentes is None:
+        print("No se pudieron extraer correctamente los componentes del circuito")
         return None
 
-    choice = detectar_tipo_oraculo_desde_qasm(qc)
-    if choice is None:
-        print("No se pudo detectar el tipo de oráculo")
-        print("Ahora mismo solo detecto patrones estructurales diferenciables")
+    componentes["qc_original"] = qc
+    componentes["path"] = path
+
+    return componentes
+
+
+##########################
+# NUEVOS METODOS
+##########################
+def construir_subcircuito_desde_ops(ops, n):
+    sub_qc = QuantumCircuit(n)
+    for instr in ops:
+        qargs = [qindex(q) for q in instr.qubits]
+        sub_qc.append(instr.operation, qargs, [])
+    return sub_qc
+
+
+
+def extraer_componentes_grover(qc):
+    if not es_capa_h_inicial(qc):
         return None
 
-    print("Número de qubits:", n)
-    print("Tipo detectado:", choice)
-    print("Número introducido:", number)
+    inicio_difusor = detectar_inicio_difusor(qc)
+    if inicio_difusor is None:
+        return None
 
-    return n, number, choice
+    n = qc.num_qubits
+
+    ops_h = qc.data[:n]
+    ops_oraculo = qc.data[n:inicio_difusor]
+    ops_h_y_oraculo = qc.data[:inicio_difusor]
+
+    prep_qc = construir_subcircuito_desde_ops(ops_h, n)
+    oracle_qc = construir_subcircuito_desde_ops(ops_oraculo, n)
+    full_until_oracle_qc = construir_subcircuito_desde_ops(ops_h_y_oraculo, n)
+
+    return {
+        "n": n,
+        "inicio_difusor": inicio_difusor,
+        "prep_qc": prep_qc,
+        "oracle_qc": oracle_qc,
+        "full_until_oracle_qc": full_until_oracle_qc
+    }
 
 
-# =========================
+
+def obtener_vectores_oraculo_usuario(qc):
+    componentes = extraer_componentes_grover(qc)
+    if componentes is None:
+        return None
+
+    prep_qc = componentes["prep_qc"]
+    oracle_qc = componentes["oracle_qc"]
+    full_until_oracle_qc = componentes["full_until_oracle_qc"]
+
+    psi_in = Statevector.from_instruction(prep_qc)
+    psi_out = Statevector.from_instruction(full_until_oracle_qc)
+
+    componentes["psi_in"] = psi_in
+    componentes["psi_out"] = psi_out
+
+    return componentes
+
+
+def mostrar_resumen_qasm(componentes):
+    n = componentes["n"]
+    inicio_difusor = componentes["inicio_difusor"]
+    psi_in = componentes["psi_in"]
+    psi_out = componentes["psi_out"]
+
+    print("\n==============================")
+    print("RESUMEN DEL QASM ANALIZADO")
+    print("==============================")
+    print("Numero de qubits:", n)
+    print("Inicio del difusor en la operacion:", inicio_difusor)
+
+    print("\n--- Vector de estado inicial del oraculo (tras H) ---")
+    print(psi_in)
+
+    print("\n--- Vector de estado final del oraculo (tras H + oraculo) ---")
+    print(psi_out)
+
+    marcados = detectar_estados_marcados_desde_vectores(psi_in, psi_out)
+    componentes["marcados_detectados"] = marcados
+
+    print("\n--- Estados marcados detectados por el oraculo ---")
+    print(marcados)
+
+def detectar_estados_marcados_desde_vectores(psi_in, psi_out, tol=1e-8):
+    marcados = []
+
+    amps_in = psi_in.data
+    amps_out = psi_out.data
+
+    for i in range(len(amps_in)):
+        if np.allclose(amps_out[i], -amps_in[i], atol=tol):
+            marcados.append(i)
+
+    return marcados
+
+#CSVVVVVVVVVVVV
+
+def pedir_csv_soluciones():
+    root = tk.Tk()
+    root.withdraw()
+    root.update()
+
+    path = filedialog.askopenfilename(
+        title="Selecciona el archivo CSV con los estados marcados",
+        filetypes=[("Archivos CSV", "*.csv")]
+    )
+
+    root.destroy()
+
+    if not path:
+        return None
+
+    return path
+
+def leer_soluciones_desde_csv(path_csv, n):
+    max_val = 2**n - 1
+    soluciones = []
+
+    with open(path_csv, "r", encoding="utf-8") as f:
+        for linea in f:
+            linea = linea.strip()
+
+            if not linea:
+                continue
+
+            try:
+                numero = int(linea)
+            except ValueError:
+                raise ValueError(f"Valor no valido en el CSV: '{linea}'")
+
+            if numero < 0 or numero > max_val:
+                raise ValueError(
+                    f"Valor fuera de rango en el CSV: {numero} (debe estar entre 0 y {max_val})"
+                )
+
+            soluciones.append(numero)
+
+    soluciones = sorted(set(soluciones))
+    return soluciones
+
+def comparar_soluciones_detectadas_con_csv(soluciones_detectadas, soluciones_csv):
+    return sorted(soluciones_detectadas) == sorted(soluciones_csv)
+
+
+def detectar_estados_marcados_desde_vectores(psi_in, psi_out, tol=1e-8):
+    marcados = []
+
+    amps_in = psi_in.data
+    amps_out = psi_out.data
+
+    for i in range(len(amps_in)):
+        if np.allclose(amps_out[i], -amps_in[i], atol=tol):
+            marcados.append(i)
+
+    return marcados
+
+def construir_oraculo_esperado_desde_csv(soluciones_csv, n):
+    oracle_qc = QuantumCircuit(n)
+
+    for estado in soluciones_csv:
+        oracle_qc.append(mark_one(estado, n).to_gate(), range(n))
+
+    return oracle_qc
+
+def obtener_vector_esperado_desde_csv(psi_in, soluciones_csv, n):
+    oracle_esperado = construir_oraculo_esperado_desde_csv(soluciones_csv, n)
+    psi_out_esperado = psi_in.evolve(oracle_esperado)
+    return psi_out_esperado
+
+def comparar_statevectors_hasta_fase_global(psi1, psi2, tol=1e-8):
+    v1 = psi1.data
+    v2 = psi2.data
+
+    idx = None
+    for i in range(len(v1)):
+        if abs(v2[i]) > tol:
+            idx = i
+            break
+
+    if idx is None:
+        return np.allclose(v1, v2, atol=tol)
+
+    fase = v1[idx] / v2[idx]
+    return np.allclose(v1, fase * v2, atol=tol)
+
+# #########################
 # MAIN
-# =========================
+# #########################
 
 def main():
-    params = obtener_parametros_desde_qasm()
+    componentes = obtener_qasm_y_vectores()
 
-    if params is None:
+    if componentes is None:
         return
 
-    n, number, choice = params
+    mostrar_resumen_qasm(componentes)
 
-    states, labels = analyze_grover(n, number, choice)
-
-    if not states:
-        print("No hay estados para graficar.")
+    path_csv = pedir_csv_soluciones()
+    if path_csv is None:
+        print("\nNo se selecciono archivo CSV")
         return
 
-    solutions = get_solution_indices(choice, number, n)
-    plot_grover_step_by_step(states, labels, n, solutions)
+    try:
+        soluciones_csv = leer_soluciones_desde_csv(path_csv, componentes["n"])
+    except ValueError as e:
+        print(f"\nError al leer el CSV: {e}")
+        return
 
+    print("\n--- Estados marcados leidos desde el CSV ---")
+    print(soluciones_csv)
+
+    marcados_detectados = componentes["marcados_detectados"]
+
+    if comparar_soluciones_detectadas_con_csv(marcados_detectados, soluciones_csv):
+        print("\n✅ El oraculo del QASM coincide con los estados del CSV")
+    else:
+        print("\n❌ El oraculo del QASM NO coincide con los estados del CSV")
+
+    psi_in = componentes["psi_in"]
+    psi_out_usuario = componentes["psi_out"]
+
+    psi_out_esperado = obtener_vector_esperado_desde_csv(
+        psi_in,
+        soluciones_csv,
+        componentes["n"]
+    )
+
+    print("\n--- Vector de estado esperado segun el CSV ---")
+    print(psi_out_esperado)
+
+    if comparar_statevectors_hasta_fase_global(psi_out_usuario, psi_out_esperado):
+        print("\n✅ El vector final del oraculo coincide con el esperado (salvo fase global)")
+    else:
+        print("\n❌ El vector final del oraculo NO coincide con el esperado")
 
 if __name__ == "__main__":
     main()
