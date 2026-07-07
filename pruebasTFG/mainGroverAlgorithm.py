@@ -22,7 +22,7 @@ def qindex(q):
 # This method loads a .qasm file from disk and converts it into a Qiskit QuantumCircuit for later analysis.
 # The "path" parameter is the file path selected by the user.
 # LEGACY_CUSTOM_INSTRUCTIONS is used to ensure compatibility with certain legacy QASM instructions that might appear.
-def cargar_circuito(path):
+def load_circuit(path):
     with open(path, "r", encoding="utf-8") as f:
         return loads(
             f.read(),
@@ -34,7 +34,7 @@ def cargar_circuito(path):
 # - "n": the total number of qubits in the subcircuit
 # It is used to isolate specific parts of the circuit, such as the initial preparation or the block leading up to the oracle.
 # For each instruction, it retrieves the qubits it acts upon and adds it to the new subcircuit, maintaining its structure.
-def construir_subcircuito_desde_ops(ops, n):
+def build_subcircuit_from_operations(ops, n):
     sub_qc = QuantumCircuit(n)
     for instr in ops:
         qargs = [qindex(q) for q in instr.qubits]
@@ -151,7 +151,7 @@ def oracle_less(number: int, nqubits: int, name=None):
     return circuit
 
 # This method checks if a number is prime.
-def es_primo(n):
+def is_prime(n):
     if n < 2:
         return False
     if n == 2:
@@ -197,7 +197,7 @@ def oracle_evens(nqubits, name=None):
 
 # This method constructs an oracle that marks all prime states within the search space defined by "nqubits".
 def oracle_primes(nqubits, name=None):
-    marked = [i for i in range(2**nqubits) if es_primo(i)]
+    marked = [i for i in range(2**nqubits) if is_prime(i)]
     return oracle_from_marked_states(
         marked,
         nqubits,
@@ -206,7 +206,7 @@ def oracle_primes(nqubits, name=None):
 
 # This method constructs an expected oracle from the marked states read from the CSV file.
 # It uses: "soluciones_csv": list of states that should be marked and "n": number of qubits in the circuit
-def construir_oraculo_esperado_desde_csv(soluciones_csv, n):
+def build_expected_oracle_from_csv(soluciones_csv, n):
     return oracle_from_marked_states(soluciones_csv, n, name="oracle_csv")
 
 # This method calculates what the oracle's output vector should be if the circuit behaves exactly as indicated by the CSV.
@@ -215,15 +215,15 @@ def construir_oraculo_esperado_desde_csv(soluciones_csv, n):
 # - "soluciones_csv": states that should be marked
 # - "n": number of qubits
 # First, it constructs the expected oracle and then applies it to the input state to obtain the theoretical output vector.
-def obtener_vector_esperado_desde_csv(psi_in, soluciones_csv, n):
-    oracle_esperado = construir_oraculo_esperado_desde_csv(soluciones_csv, n)
+def get_expected_statevector_from_csv(psi_in, soluciones_csv, n):
+    oracle_esperado = build_expected_oracle_from_csv(soluciones_csv, n)
     psi_out_esperado = psi_in.evolve(oracle_esperado)
     return psi_out_esperado
 
 # This method checks if the circuit begins with a Hadamard layer applied to all qubits, as expected in the initial preparation
 # of Grover's algorithm. First, it verifies that the circuit has at least n operations.Then, it checks that the first n
 # operations are H gates and that they cover exactly all qubits in the circuit.
-def es_capa_h_inicial(qc):
+def has_initial_hadamard_layer(qc):
     n = qc.num_qubits
 
     if len(qc.data) < n:
@@ -240,7 +240,7 @@ def es_capa_h_inicial(qc):
 # This method finds the position in the circuit where the diffuser begins. To do this, it iterates through
 # the operations and tries to recognize the characteristic pattern formed by a Hadamard layer followed by a layer
 # of X gates on all qubits. If it finds this pattern, it returns the start position of the diffuser.
-def detectar_inicio_difusor(qc):
+def detect_diffuser_start(qc):
     ops = qc.data
     n = qc.num_qubits
     total = len(ops)
@@ -273,11 +273,11 @@ def detectar_inicio_difusor(qc):
 # - the initial preparation
 # - the block ranging from the beginning to the end of the oracle
 # and returns this information in an organized structure.
-def extraer_componentes_grover(qc):
-    if not es_capa_h_inicial(qc):
+def extract_grover_components(qc):
+    if not has_initial_hadamard_layer(qc):
         return None
 
-    inicio_difusor = detectar_inicio_difusor(qc)
+    inicio_difusor = detect_diffuser_start(qc)
     if inicio_difusor is None:
         return None
 
@@ -286,8 +286,8 @@ def extraer_componentes_grover(qc):
     ops_h = qc.data[:n]
     ops_h_y_oraculo = qc.data[:inicio_difusor]
 
-    prep_qc = construir_subcircuito_desde_ops(ops_h, n)
-    full_until_oracle_qc = construir_subcircuito_desde_ops(ops_h_y_oraculo, n)
+    prep_qc = build_subcircuit_from_operations(ops_h, n)
+    full_until_oracle_qc = build_subcircuit_from_operations(ops_h_y_oraculo, n)
 
     return {
         "n": n,
@@ -300,8 +300,8 @@ def extraer_componentes_grover(qc):
 # First, it extracts the relevant components from the Grover circuit. Then, it calculates:
 # - "psi_in": the state after the uniform preparation
 # - "psi_out": the state after applying the oracle
-def obtener_vectores_oraculo_usuario(qc):
-    componentes = extraer_componentes_grover(qc)
+def get_user_oracle_statevectors(qc):
+    componentes = extract_grover_components(qc)
     if componentes is None:
         return None
 
@@ -318,7 +318,7 @@ def obtener_vectores_oraculo_usuario(qc):
 
 # This method detects which states have been marked by the oracle by comparing the input vector and the output vector.
 # The idea is simple: if an amplitude goes from "a" to "-a", it means that state has undergone the oracle's phase inversion.
-def detectar_estados_marcados_desde_vectores(psi_in, psi_out, tol=1e-8):
+def detect_marked_states_from_statevectors(psi_in, psi_out, tol=1e-8):
     marcados = []
 
     amps_in = psi_in.data
@@ -332,7 +332,7 @@ def detectar_estados_marcados_desde_vectores(psi_in, psi_out, tol=1e-8):
 
 # This method attempts to classify the detected oracle based on the pattern of marked states.
 # It checks if that pattern matches any of the supported types: "equal", "less", "greater", "evens", or "primes".
-def clasificar_oraculo_por_estados(marcados, n):
+def classify_oracle_by_marked_states(marcados, n):
     marcados = sorted(marcados)
     N = 2**n
 
@@ -374,7 +374,7 @@ def clasificar_oraculo_por_estados(marcados, n):
             "descripcion": "evens"
         }
 
-    primos = [i for i in range(N) if es_primo(i)]
+    primos = [i for i in range(N) if is_prime(i)]
     if marcados == primos:
         return {
             "tipo": "primes",
@@ -391,7 +391,7 @@ def clasificar_oraculo_por_estados(marcados, n):
 # This method displays a summary of the analysis performed on the QASM circuit.
 # Additionally, it detects the marked states and classifies the oracle type,
 # storing both results inside "componentes" to reuse them later in validation and simulation.
-def mostrar_resumen_qasm(componentes):
+def display_qasm_summary(componentes):
     n = componentes["n"]
     inicio_difusor = componentes["inicio_difusor"]
     psi_in = componentes["psi_in"]
@@ -408,13 +408,13 @@ def mostrar_resumen_qasm(componentes):
     print("\n--- Vector de estado final del oraculo (tras H + oraculo) ---")
     print(psi_out)
 
-    marcados = detectar_estados_marcados_desde_vectores(psi_in, psi_out)
+    marcados = detect_marked_states_from_statevectors(psi_in, psi_out)
     componentes["marcados_detectados"] = marcados
 
     print("\n--- Estados marcados detectados por el oraculo ---")
     print(marcados)
 
-    clasificacion = clasificar_oraculo_por_estados(marcados, n)
+    clasificacion = classify_oracle_by_marked_states(marcados, n)
     componentes["clasificacion_oraculo"] = clasificacion
 
     print("\n--- Clasificacion semantica del oraculo ---")
@@ -425,7 +425,7 @@ def mostrar_resumen_qasm(componentes):
 # *******
 
 # This method opens a window for the user to select the QASM file containing the circuit to be analyzed.
-def pedir_qasm():
+def select_qasm_file():
     root = tk.Tk()
     root.withdraw()
     root.update()
@@ -444,7 +444,7 @@ def pedir_qasm():
 
 # This method opens a window for the user to select the reference CSV file.
 # That CSV can contain marked states or an expected statevector.
-def pedir_csv_soluciones():
+def select_reference_csv():
     root = tk.Tk()
     root.withdraw()
     root.update()
@@ -463,7 +463,7 @@ def pedir_csv_soluciones():
 
 # This method reads a CSV file, interpreting it as a list of marked states.
 # It verifies that each line is a valid integer and that it falls within the allowed range, which goes from 0 to 2^n - 1.
-def leer_soluciones_desde_csv(path_csv, n):
+def read_marked_states_from_csv(path_csv, n):
     max_val = 2**n - 1
     soluciones = []
 
@@ -492,7 +492,7 @@ def leer_soluciones_desde_csv(path_csv, n):
 # This method decides how the CSV content should be interpreted. It reads the first non-empty line and checks if
 # it can be converted to an integer. If it can, the CSV is interpreted as a list of marked states.
 # If it cannot, it is interpreted as a statevector.
-def detectar_tipo_csv(path_csv):
+def detect_csv_type(path_csv):
     with open(path_csv, "r", encoding="utf-8") as f:
         for linea in f:
             linea = linea.strip()
@@ -512,7 +512,7 @@ def detectar_tipo_csv(path_csv):
 # - the vector does not have a norm of zero
 # - the vector is normalized
 # If everything is correct, it returns the statevector as a Qiskit object.
-def leer_statevector_desde_csv(path_csv, n):
+def read_statevector_from_csv(path_csv, n):
     amplitudes = []
 
     with open(path_csv, "r", encoding="utf-8") as f:
@@ -559,11 +559,11 @@ def leer_statevector_desde_csv(path_csv, n):
 # - the detected CSV type
 # - the list of solutions, if it exists
 # - or the statevector, if it exists
-def leer_csv_entrada(path_csv, n):
-    tipo = detectar_tipo_csv(path_csv)
+def read_csv_input(path_csv, n):
+    tipo = detect_csv_type(path_csv)
 
     if tipo == "numbers":
-        soluciones = leer_soluciones_desde_csv(path_csv, n)
+        soluciones = read_marked_states_from_csv(path_csv, n)
         return {
             "tipo_csv": "numbers",
             "soluciones": soluciones,
@@ -571,7 +571,7 @@ def leer_csv_entrada(path_csv, n):
         }
 
     if tipo == "statevector":
-        statevector = leer_statevector_desde_csv(path_csv, n)
+        statevector = read_statevector_from_csv(path_csv, n)
         return {
             "tipo_csv": "statevector",
             "soluciones": None,
@@ -583,12 +583,12 @@ def leer_csv_entrada(path_csv, n):
 
 # This method compares the list of marked states detected in the QASM with the list of states read from the CSV.
 # It sorts both lists before comparing them to prevent the result from depending on the order in which the states appear.
-def comparar_soluciones_detectadas_con_csv(soluciones_detectadas, soluciones_csv):
+def compare_detected_states_with_csv(soluciones_detectadas, soluciones_csv):
     return sorted(soluciones_detectadas) == sorted(soluciones_csv)
 
 # This method compares two statevectors allowing for a global phase difference, since that phase does not change the physical state.
 # It first looks for a non-zero reference amplitude in the second vector and uses it to calculate the phase factor.
-def comparar_statevectors_hasta_fase_global(psi1, psi2, tol=1e-8):
+def compare_statevectors_up_to_global_phase(psi1, psi2, tol=1e-8):
     v1 = psi1.data
     v2 = psi2.data
 
@@ -606,7 +606,7 @@ def comparar_statevectors_hasta_fase_global(psi1, psi2, tol=1e-8):
 
 # This method compares two classifications. For both to match, they must have the same oracle type
 # and also the same associated parameter, if it exists.
-def comparar_clasificaciones(clasificacion_qasm, clasificacion_csv):
+def compare_oracle_classifications(clasificacion_qasm, clasificacion_csv):
     return (
         clasificacion_qasm["tipo"] == clasificacion_csv["tipo"] and
         clasificacion_qasm["parametro"] == clasificacion_csv["parametro"]
@@ -617,7 +617,7 @@ def comparar_clasificaciones(clasificacion_qasm, clasificacion_csv):
 # - the marked states
 # - the final vector of the oracle
 # - the semantic classification
-def validar_qasm_con_csv(componentes, entrada_csv):
+def validate_qasm_against_csv(componentes, entrada_csv):
     psi_in = componentes["psi_in"]
     psi_out_usuario = componentes["psi_out"]
     marcados_detectados = componentes["marcados_detectados"]
@@ -638,12 +638,12 @@ def validar_qasm_con_csv(componentes, entrada_csv):
         print("\n--- CSV interpretado como lista de estados marcados ---")
         print(soluciones_csv)
 
-        listas_coinciden = comparar_soluciones_detectadas_con_csv(
+        listas_coinciden = compare_detected_states_with_csv(
             marcados_detectados,
             soluciones_csv
         )
 
-        psi_out_esperado = obtener_vector_esperado_desde_csv(
+        psi_out_esperado = get_expected_statevector_from_csv(
             psi_in,
             soluciones_csv,
             n
@@ -652,13 +652,13 @@ def validar_qasm_con_csv(componentes, entrada_csv):
         print("\n--- Vector de estado esperado segun el CSV ---")
         print(psi_out_esperado)
 
-        vectores_coinciden = comparar_statevectors_hasta_fase_global(
+        vectores_coinciden = compare_statevectors_up_to_global_phase(
             psi_out_usuario,
             psi_out_esperado
         )
 
-        clasificacion_csv = clasificar_oraculo_por_estados(soluciones_csv, n)
-        clasificacion_coincide = comparar_clasificaciones(
+        clasificacion_csv = classify_oracle_by_marked_states(soluciones_csv, n)
+        clasificacion_coincide = compare_oracle_classifications(
             clasificacion_qasm,
             clasificacion_csv
         )
@@ -694,22 +694,22 @@ def validar_qasm_con_csv(componentes, entrada_csv):
         print("\n--- CSV interpretado como statevector esperado ---")
         print(psi_out_esperado)
 
-        vectores_coinciden = comparar_statevectors_hasta_fase_global(
+        vectores_coinciden = compare_statevectors_up_to_global_phase(
             psi_out_usuario,
             psi_out_esperado
         )
 
-        marcados_csv = detectar_estados_marcados_desde_vectores(
+        marcados_csv = detect_marked_states_from_statevectors(
             psi_in,
             psi_out_esperado
         )
 
-        clasificacion_csv = clasificar_oraculo_por_estados(marcados_csv, n)
-        listas_coinciden = comparar_soluciones_detectadas_con_csv(
+        clasificacion_csv = classify_oracle_by_marked_states(marcados_csv, n)
+        listas_coinciden = compare_detected_states_with_csv(
             marcados_detectados,
             marcados_csv
         )
-        clasificacion_coincide = comparar_clasificaciones(
+        clasificacion_coincide = compare_oracle_classifications(
             clasificacion_qasm,
             clasificacion_csv
         )
@@ -746,7 +746,7 @@ def validar_qasm_con_csv(componentes, entrada_csv):
 
 # This method constructs an internal oracle equivalent to the one that has
 # been previously detected and validated.
-def construir_oraculo_interno_desde_clasificacion(clasificacion, n):
+def build_internal_oracle_from_classification(clasificacion, n):
     tipo = clasificacion["tipo"]
     parametro = clasificacion["parametro"]
 
@@ -824,23 +824,23 @@ def analyze_grover_with_internal_oracle(n, oracle_circuit, solution_indices):
 
 # It prompts the user for the QASM file, loads it, and checks that it has a structure compatible with Grover.
 # If the circuit is valid, it obtains the vectors needed to analyze the oracle's behavior.
-def obtener_qasm_y_vectores():
-    path = pedir_qasm()
+def load_qasm_and_extract_statevectors():
+    path = select_qasm_file()
     if path is None:
         print("No se selecciono archivo QASM")
         return None
 
-    qc = cargar_circuito(path)
+    qc = load_circuit(path)
 
-    if not es_capa_h_inicial(qc):
+    if not has_initial_hadamard_layer(qc):
         print("El circuito no empieza con una superposicion uniforme de Grover")
         return None
 
-    if detectar_inicio_difusor(qc) is None:
+    if detect_diffuser_start(qc) is None:
         print("No se ha detectado un difusor con estructura de Grover")
         return None
 
-    componentes = obtener_vectores_oraculo_usuario(qc)
+    componentes = get_user_oracle_statevectors(qc)
     if componentes is None:
         print("No se pudieron extraer correctamente los componentes del circuito")
         return None
@@ -940,7 +940,7 @@ def marked_states_latex(solution_indices, n):
     if not values:
         return r"\mathrm{Estados\ marcados:}\ \varnothing"
 
-    clasificacion = clasificar_oraculo_por_estados(values, n)
+    clasificacion = classify_oracle_by_marked_states(values, n)
     tipo = clasificacion["tipo"]
     parametro = clasificacion["parametro"]
 
@@ -1006,7 +1006,7 @@ def high_solution_case_explanation(n, solution_indices):
     return None
 
 # This method draws the side panel of the mathematical summary.
-def dibujar_resumen_matematico(ax_math, datos):
+def draw_mathematical_summary(ax_math, datos):
     ax_math.axis("off")
 
     bg_color = "#f3f3f3"
@@ -1163,7 +1163,7 @@ def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Grover
             pass
 
         ax_math = fig.add_axes([panel_x, y_math, panel_w, h_math])
-        dibujar_resumen_matematico(ax_math, datos)
+        draw_mathematical_summary(ax_math, datos)
 
         if datos["explicacion_extra"] is not None:
             ax_info = fig.add_axes([panel_x, y_info, panel_w, h_info])
@@ -1917,19 +1917,19 @@ def draw_arc_from_oracle_to_diffuser(ax, a_oracle, a_diff, label, color="#ff2d48
 #It is the method that controls the entire application. It coordinates the complete program flow: circuit loading, CSV reading,
 #oracle validation, internal oracle construction, Grover's execution, and final representation.
 def main():
-    componentes = obtener_qasm_y_vectores()
+    componentes = load_qasm_and_extract_statevectors()
     if componentes is None:
         return
 
-    mostrar_resumen_qasm(componentes)
+    display_qasm_summary(componentes)
 
-    path_csv = pedir_csv_soluciones()
+    path_csv = select_reference_csv()
     if path_csv is None:
         print("\nNo se selecciono archivo CSV")
         return
 
     try:
-        entrada_csv = leer_csv_entrada(path_csv, componentes["n"])
+        entrada_csv = read_csv_input(path_csv, componentes["n"])
     except ValueError as e:
         print("\n--- Error durante la validacion del CSV ---")
         print(str(e))
@@ -1938,7 +1938,7 @@ def main():
         print("Se detiene la ejecucion y no se pasa a la fase de Grover.")
         return
 
-    validacion = validar_qasm_con_csv(componentes, entrada_csv)
+    validacion = validate_qasm_against_csv(componentes, entrada_csv)
 
     print("\n--- Resumen final del oraculo del circuito ---")
     print(f"Tipo detectado por comportamiento: {componentes['clasificacion_oraculo']['tipo']}")
@@ -1956,7 +1956,7 @@ def main():
 
     print("\nValidacion completada: el QASM y el CSV describen el mismo comportamiento.")
 
-    oraculo_interno = construir_oraculo_interno_desde_clasificacion(
+    oraculo_interno = build_internal_oracle_from_classification(
         componentes["clasificacion_oraculo"],
         componentes["n"]
     )
