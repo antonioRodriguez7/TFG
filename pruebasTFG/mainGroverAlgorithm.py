@@ -4,12 +4,12 @@ from qiskit.circuit.library import MCXGate
 from qiskit.qasm2 import loads, LEGACY_CUSTOM_INSTRUCTIONS
 import math
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle
 import numpy as np
 import tkinter as tk
 from tkinter import filedialog
 from matplotlib.patches import Circle, FancyBboxPatch
 from matplotlib.offsetbox import TextArea, VPacker, HPacker, AnchoredOffsetbox, DrawingArea
+from matplotlib.patches import Circle, Arc
 
 # This method retrieves the index of a qubit. It is used because, depending on the Qiskit version or object type,
 # the index may be stored as "_index" or "index". This unifies how the qubit number is accessed, allowing the rest
@@ -1009,13 +1009,15 @@ def high_solution_case_explanation(n, solution_indices):
 def dibujar_resumen_matematico(ax_math, datos):
     ax_math.axis("off")
 
+    bg_color = "#f3f3f3"
+
     caja = FancyBboxPatch(
         (0.0, 0.0),
         1.0,
         1.0,
         transform=ax_math.transAxes,
         boxstyle="round,pad=0.0,rounding_size=0.025",
-        facecolor="white",
+        facecolor=bg_color,
         edgecolor="#cccccc",
         linewidth=1.0,
         clip_on=False
@@ -1080,23 +1082,27 @@ def dibujar_resumen_matematico(ax_math, datos):
 # - the legend
 # - the mathematical summary
 # - and, if needed, an additional interpretive text.
-def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Evolución de Grover"):
+def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Grover Evolution"):
     iterations = (len(states) - 2) // 2
 
     if iterations <= 0:
         print("No hay iteraciones para representar.")
         return
-    
-    N = 2**n
-    ket_u = np.ones(N, dtype=complex) / np.sqrt(N)
 
     points = [project_state(s, solution_indices, n) for s in states]
+
+    bg_color = "#f3f3f3"
 
     for iteration_number in range(1, iterations + 1):
         fig = plt.figure(figsize=(16, 9))
 
-        # main representation panel
-        ax = fig.add_axes([0.04, 0.08, 0.49, 0.74])
+        main_x = 0.04
+        main_y = 0.08
+        main_w = 0.49
+        main_h = 0.74
+        main_top = main_y + main_h
+
+        ax = fig.add_axes([main_x, main_y, main_w, main_h])
 
         datos = draw_single_iteration(
             ax,
@@ -1114,8 +1120,7 @@ def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Evoluc
             y=0.955
         )
 
-        # right side
-        panel_x = 0.545
+        panel_x = 0.485
         panel_w = 0.25
 
         h_legend = 0.25
@@ -1125,13 +1130,10 @@ def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Evoluc
         gap_legend_math = 0.035
         gap_math_info = 0.045
 
-        top = 0.875
-
-        y_legend = top - h_legend
+        y_legend = main_top - h_legend
         y_math = y_legend - gap_legend_math - h_math
         y_info = y_math - gap_math_info - h_info
 
-        # legend panel
         ax_leg = fig.add_axes([panel_x, y_legend, panel_w, h_legend])
         ax_leg.axis("off")
 
@@ -1143,13 +1145,16 @@ def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Evoluc
             mode="expand",
             fontsize=11,
             frameon=True,
-            title="Leyenda",
+            title="Legend",
             title_fontsize=14,
             borderpad=0.9,
             labelspacing=0.65,
             handlelength=2.0,
             handletextpad=0.8,
-            borderaxespad=0.0
+            borderaxespad=0.0,
+            facecolor=bg_color,
+            edgecolor="#cccccc",
+            framealpha=1.0
         )
 
         try:
@@ -1157,11 +1162,9 @@ def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Evoluc
         except Exception:
             pass
 
-        # mathematical summary panel
         ax_math = fig.add_axes([panel_x, y_math, panel_w, h_math])
         dibujar_resumen_matematico(ax_math, datos)
 
-        # additional interpretive text panel
         if datos["explicacion_extra"] is not None:
             ax_info = fig.add_axes([panel_x, y_info, panel_w, h_info])
             ax_info.axis("off")
@@ -1185,7 +1188,7 @@ def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Evoluc
         fig.text(
             0.5,
             0.025,
-            "Cierra esta ventana para pasar a la siguiente iteración",
+            "Close this window to move to the next iteration",
             ha="center",
             va="center",
             fontsize=12,
@@ -1196,7 +1199,6 @@ def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Evoluc
             )
         )
 
-        # open the figure in maximized mode, if possible
         try:
             manager = plt.get_current_fig_manager()
 
@@ -1210,7 +1212,6 @@ def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Evoluc
                         manager.full_screen_toggle()
                     except Exception:
                         pass
-
         except Exception:
             pass
 
@@ -1230,19 +1231,14 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
     x_oracle, y_oracle = points[oracle_idx]
     x_diff, y_diff = points[diffuser_idx]
 
-    color_start = "#148a1f"
-    color_oracle = "#e61919"
-    color_diff = "#1749ff"
-    color_ref_oracle = "#ff9896"
-    color_ref_diff = "#9ecae1"
+    color_start = "#b3752f"      
+    color_oracle = "#b3752f"     
+    color_diff = "#f39c12"       
+    angle_color = "#ff2d48"      
 
     bg_color = "#f3f3f3"
-    axis_color = "#222222"
+    axis_color = "#333333"
     circle_color = "#444444"
-    start_color = "#a9783f"
-    oracle_color = "#a9783f"
-    diffuser_color = "#f5a623"
-    text_red = "#ff2d48"
 
     R = 0.82
 
@@ -1258,16 +1254,8 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
     def point_on_circle(r, angle):
         return r * math.cos(angle), r * math.sin(angle)
 
-    def angle_diff(a1, a2):
-        diff = a2 - a1
-        while diff <= -math.pi:
-            diff += 2 * math.pi
-        while diff > math.pi:
-            diff -= 2 * math.pi
-        return diff
-
-    def iteration_theta_label(iteration_number):
-        factor = 2 * iteration_number
+    def iteration_theta_label(iter_num):
+        factor = 2 * iter_num + 1
         if factor == 1:
             return r"$\theta$"
         return rf"${factor}\theta$"
@@ -1286,9 +1274,11 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
         )
         ax.add_patch(circ)
 
+        # Ejes
         ax.plot([-R, R], [0, 0], linewidth=1.25, color=axis_color, zorder=5)
         ax.plot([0, 0], [-R, R], linewidth=1.25, color=axis_color, zorder=5)
 
+        # Flecha eje X
         ax.annotate(
             "",
             xy=(R, 0),
@@ -1304,6 +1294,7 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
             zorder=6
         )
 
+        # Flecha eje Y
         ax.annotate(
             "",
             xy=(0, R),
@@ -1319,9 +1310,10 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
             zorder=6
         )
 
+        # Etiquetas de ejes
         ax.text(
             0,
-            R + 0.13,
+            R + 0.11,
             r"$|good\rangle$",
             fontsize=15,
             color=axis_color,
@@ -1331,7 +1323,7 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
         )
 
         ax.text(
-            R + 0.065,
+            R + 0.07,
             0,
             r"$|bad\rangle$",
             fontsize=15,
@@ -1391,50 +1383,6 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
                 zorder=9
             )
 
-    def draw_arc_from_oracle_to_diffuser(a_oracle, a_diff, label):
-        delta = angle_diff(a_oracle, a_diff)
-        angles = np.linspace(a_oracle, a_oracle + delta, 120)
-
-        r = 0.34
-        xs = r * np.cos(angles)
-        ys = r * np.sin(angles)
-
-        ax.plot(
-            xs,
-            ys,
-            color=text_red,
-            lw=1.8,
-            zorder=7
-        )
-
-        if len(xs) >= 3:
-            ax.annotate(
-                "",
-                xy=(xs[-1], ys[-1]),
-                xytext=(xs[-3], ys[-3]),
-                arrowprops=dict(
-                    arrowstyle="-|>",
-                    color=text_red,
-                    lw=1.8,
-                    mutation_scale=12
-                ),
-                zorder=8
-            )
-
-        mid = len(xs) // 2
-
-        ax.text(
-            xs[mid] + 0.10,
-            ys[mid],
-            label,
-            fontsize=15,
-            color="#444444",
-            ha="center",
-            va="center",
-            clip_on=False,
-            zorder=9
-        )
-
     xs, ys = normalize(x_start, y_start)
     xo, yo = normalize(x_oracle, y_oracle)
     xd, yd = normalize(x_diff, y_diff)
@@ -1443,53 +1391,81 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
     theta_oracle = angle_of(xo, yo)
     theta_diff = angle_of(xd, yd)
 
+    theta_start_deg = np.degrees(theta_start)
+    theta_diff_deg = np.degrees(theta_diff)
+
     draw_base()
 
+    # Etiqueta del vector verde
     if iteration_number == 1:
-        start_display = r"$|all\rangle$"
+        start_display = r"$|u\rangle$"
         start_legend = "u: estado uniforme inicial"
     else:
         start_display = rf"$\psi_{{{iteration_number-1}}}$"
         start_legend = rf"$\psi_{{{iteration_number-1}}}$: estado de entrada a esta iteración"
 
+    # Estado de entrada
     draw_vector(
         theta_start,
-        start_color,
+        color_start,
         label=start_display,
         linestyle=(0, (3, 3)),
         lw=1.45,
         label_r=R + 0.09
     )
 
+    # Estado tras oráculo
     draw_vector(
         theta_oracle,
-        oracle_color,
+        color_oracle,
         label=rf"$O_{{{iteration_number}}}$",
         linestyle=(0, (3, 3)),
         lw=1.35,
         label_r=R + 0.09
     )
 
+    # Estado tras difusor
     draw_vector(
         theta_diff,
-        diffuser_color,
+        color_diff,
         label=rf"$D_{{{iteration_number}}}$",
         linestyle="-",
         lw=2.25,
         label_r=R + 0.09
     )
+    if iteration_number == 1:
+        draw_angle_arc(
+            ax,
+            radius=0.18,
+            angle_deg=theta_start_deg,
+            label=r"$\theta$",
+            color=angle_color,
+            text_offset=0.05
+        )
 
-    label_rotacion = iteration_theta_label(iteration_number)
-
-    draw_arc_from_oracle_to_diffuser(
-        theta_oracle,
-        theta_diff,
-        label_rotacion
-    )
+        draw_angle_arc(
+            ax,
+            radius=0.30,
+            angle_deg=theta_diff_deg,
+            label=r"$3\theta$",
+            color=angle_color,
+            text_offset=0.05
+        )
+    else:
+        # En las siguientes: solo (2k+1)θ, desde eje X hasta Dk
+        factor = 2 * iteration_number + 1
+        draw_angle_arc(
+            ax,
+            radius=0.30,
+            angle_deg=theta_diff_deg,
+            label=rf"${factor}\theta$",
+            color=angle_color,
+            text_offset=0.05
+        )
 
     ax.text(
-        0.82, 0.97,
-        f"Iteración {iteration_number}",
+        0.84, 0.97,
+        f"Iteration {iteration_number}",
         transform=ax.transAxes,
         ha="center",
         va="top",
@@ -1515,14 +1491,42 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
     for spine in ax.spines.values():
         spine.set_visible(False)
 
+    if iteration_number == 1:
+        start_legend = r"$|u\rangle$: initial uniform state"
+    else:
+        start_legend = rf"$\psi_{{{iteration_number-1}}}$: input state of this iteration"
+
     handles = [
-        plt.Line2D([0], [0], color=color_start, lw=3, label=start_legend),
-        plt.Line2D([0], [0], color=color_diff, lw=3, label="D: estado tras aplicar D"),
-        plt.Line2D([0], [0], color=color_oracle, lw=3, label=r"$O_f|x\rangle$: estado tras aplicar el oráculo"),
-        plt.Line2D([0], [0], color=color_ref_oracle, lw=3, linestyle="--", label="Rotación del oráculo"),
-        plt.Line2D([0], [0], color=color_ref_diff, lw=3, linestyle="--", label="Rotación del difusor"),
-        plt.Line2D([0], [0], color="black", lw=2, label=r"$|t\rangle$  Estado solución"),
-        plt.Line2D([0], [0], color="black", lw=2, label=r"$|s\rangle$  Estado de no soluciones"),
+        plt.Line2D(
+            [0], [0],
+            color=color_start,
+            lw=3,
+            label=start_legend
+        ),
+        plt.Line2D(
+            [0], [0],
+            color=color_diff,
+            lw=3,
+            label=rf"$D_{{{iteration_number}}}$: state after applying the diffuser"
+        ),
+        plt.Line2D(
+            [0], [0],
+            color=color_oracle,
+            lw=3,
+            label=rf"$O_{{{iteration_number}}}$: state after applying the oracle"
+        ),
+        plt.Line2D(
+            [0], [0],
+            color="black",
+            lw=2,
+            label=r"$|good\rangle$  Solution state"
+        ),
+        plt.Line2D(
+            [0], [0],
+            color="black",
+            lw=2,
+            label=r"$|bad\rangle$  Non-solution state"
+        ),
     ]
 
     conjunto_soluciones = marked_states_latex(solution_indices, n)
@@ -1713,26 +1717,6 @@ def draw_initial_state_view(ax, points, labels, n, solution_indices):
                 zorder=9
             )
 
-    def draw_arc(a1, a2, label):
-        r = 0.27
-        angles = np.linspace(a1, a2, 80)
-        xs = r * np.cos(angles)
-        ys = r * np.sin(angles)
-
-        ax.plot(xs, ys, color="#444444", lw=1.35, zorder=7)
-
-        mid = len(xs) // 2
-        ax.text(
-            xs[mid] + 0.035,
-            ys[mid],
-            label,
-            fontsize=15,
-            color="#444444",
-            ha="center",
-            va="center",
-            zorder=8
-        )
-
     xu, yu = normalize(x_u, y_u)
     theta_u = angle_of(xu, yu)
 
@@ -1741,12 +1725,19 @@ def draw_initial_state_view(ax, points, labels, n, solution_indices):
     draw_vector(
         theta_u,
         all_color,
-        label=r"$|all\rangle$",
+        label=r"$|u\rangle$",
         linestyle="-",
         lw=1.55
     )
 
-    draw_arc(0.0, theta_u, r"$\theta$")
+    draw_angle_arc(
+        ax,
+        radius=0.27,
+        angle_deg=np.degrees(theta_u),
+        label=r"$\theta$",
+        color="#444444",
+        text_offset=0.05
+    )
 
     x_target, y_target = point_on_circle(R * 0.70, theta_u)
 
@@ -1844,6 +1835,85 @@ def draw_initial_state_view(ax, points, labels, n, solution_indices):
         "explicacion_extra": explicacion_extra
     }
 
+def draw_angle_arc(ax, radius, angle_deg, label, color="black", text_offset=0.08):
+    arc = Arc(
+        (0, 0),
+        2 * radius,
+        2 * radius,
+        angle=0,
+        theta1=0,
+        theta2=angle_deg,
+        color=color,
+        linewidth=2
+    )
+    ax.add_patch(arc)
+
+    angle_rad = np.deg2rad(angle_deg / 2)
+    x_text = (radius + text_offset) * np.cos(angle_rad)
+    y_text = (radius + text_offset) * np.sin(angle_rad)
+
+    ax.text(
+        x_text,
+        y_text,
+        label,
+        fontsize=13,
+        fontweight="bold",
+        color=color,
+        ha="center",
+        va="center"
+    )
+
+def draw_arc_from_oracle_to_diffuser(ax, a_oracle, a_diff, label, color="#ff2d48"):
+    def angle_diff(a1, a2):
+        diff = a2 - a1
+        while diff <= -math.pi:
+            diff += 2 * math.pi
+        while diff > math.pi:
+            diff -= 2 * math.pi
+        return diff
+
+    delta = angle_diff(a_oracle, a_diff)
+    angles = np.linspace(a_oracle, a_oracle + delta, 120)
+
+    r = 0.34
+    xs = r * np.cos(angles)
+    ys = r * np.sin(angles)
+
+    ax.plot(
+        xs,
+        ys,
+        color=color,
+        lw=1.8,
+        zorder=7
+    )
+
+    if len(xs) >= 3:
+        ax.annotate(
+            "",
+            xy=(xs[-1], ys[-1]),
+            xytext=(xs[-3], ys[-3]),
+            arrowprops=dict(
+                arrowstyle="-|>",
+                color=color,
+                lw=1.8,
+                mutation_scale=12
+            ),
+            zorder=8
+        )
+
+    mid = len(xs) // 2
+
+    ax.text(
+        xs[mid] + 0.08,
+        ys[mid],
+        label,
+        fontsize=15,
+        color=color,
+        ha="center",
+        va="center",
+        clip_on=False,
+        zorder=9
+    )
 #It is the method that controls the entire application. It coordinates the complete program flow: circuit loading, CSV reading,
 #oracle validation, internal oracle construction, Grover's execution, and final representation.
 def main():
@@ -1908,7 +1978,7 @@ def main():
                 labels,
                 componentes["n"],
                 solution_indices,
-                titulo="Evolución de Grover"
+                titulo="Grover Evolution"
             )
     else:
         print("No se ha podido asociar un oraculo interno especifico; se tratara como oraculo arbitrario")
