@@ -10,6 +10,15 @@ from tkinter import filedialog
 from matplotlib.patches import Circle, FancyBboxPatch
 from matplotlib.offsetbox import TextArea, VPacker, HPacker, AnchoredOffsetbox, DrawingArea
 from matplotlib.patches import Circle, Arc
+import matplotlib.pyplot as plt
+import numpy as np
+
+plt.rcParams.update({
+    "text.usetex": False,
+    "font.family": "serif",
+    "font.serif": ["CMU Serif", "Computer Modern Roman", "DejaVu Serif"],
+    "mathtext.fontset": "cm"
+})
 
 # This method retrieves the index of a qubit. It is used because, depending on the Qiskit version or object type,
 # the index may be stored as "_index" or "index". This unifies how the qubit number is accessed, allowing the rest
@@ -938,36 +947,36 @@ def marked_states_latex(solution_indices, n):
     values = sorted(set(solution_indices))
 
     if not values:
-        return r"\mathrm{Estados\ marcados:}\ \varnothing"
+        return r"\mathrm{Marked\ states:}\ \varnothing"
 
-    clasificacion = classify_oracle_by_marked_states(values, n)
-    tipo = clasificacion["tipo"]
-    parametro = clasificacion["parametro"]
+    classification = classify_oracle_by_marked_states(values, n)
+    tipo = classification["tipo"]
+    parametro = classification["parametro"]
 
     if tipo == "equal":
-        return rf"\mathrm{{Estado\ marcado:}}\ x={parametro}"
+        return rf"\mathrm{{Marked\ state:}}\ x={parametro}"
 
     if tipo == "less" and parametro is not None:
         if parametro == 0:
-            return r"\mathrm{Estados\ marcados:}\ \varnothing"
-        return rf"\mathrm{{Estados\ marcados:}}\ x<{parametro},\quad x\in\{{0,\ldots,{N-1}\}}"
+            return r"\mathrm{Marked\ states:}\ \varnothing"
+        return rf"\mathrm{{Marked\ states:}}\ x<{parametro},\quad x\in\{{0,\ldots,{N-1}\}}"
 
     if tipo == "greater" and parametro is not None:
         if parametro == N - 1:
-            return r"\mathrm{Estados\ marcados:}\ \varnothing"
-        return rf"\mathrm{{Estados\ marcados:}}\ x>{parametro},\quad x\in\{{0,\ldots,{N-1}\}}"
+            return r"\mathrm{Marked\ states:}\ \varnothing"
+        return rf"\mathrm{{Marked\ states:}}\ x>{parametro},\quad x\in\{{0,\ldots,{N-1}\}}"
 
     if tipo == "evens":
-        return rf"\mathrm{{Estados\ marcados:}}\ x\ \mathrm{{par}},\quad x\in\{{0,\ldots,{N-1}\}}"
+        return rf"\mathrm{{Marked\ states:}}\ x\ \mathrm{{even}},\quad x\in\{{0,\ldots,{N-1}\}}"
 
     if tipo == "primes":
-        return rf"\mathrm{{Estados\ marcados:}}\ x\ \mathrm{{primo}},\quad x\in\{{0,\ldots,{N-1}\}}"
+        return rf"\mathrm{{Marked\ states:}}\ x\ \mathrm{{prime}},\quad x\in\{{0,\ldots,{N-1}\}}"
 
     ranges = compact_ranges(values)
 
     if len(ranges) == 1 and ranges[0][0] != ranges[0][1]:
         a, b = ranges[0]
-        return rf"\mathrm{{Estados\ marcados:}}\ {a}\leq x\leq {b},\quad x\in\{{0,\ldots,{N-1}\}}"
+        return rf"\mathrm{{Marked\ states:}}\ {a}\leq x\leq {b},\quad x\in\{{0,\ldots,{N-1}\}}"
 
     partes = []
     for a, b in ranges[:4]:
@@ -979,7 +988,7 @@ def marked_states_latex(solution_indices, n):
     if len(ranges) > 4:
         partes.append(r"\cdots")
 
-    return r"\mathrm{Estados\ marcados:}\ " + r"\cup ".join(partes)
+    return r"\mathrm{Marked\ states:}\ " + r"\cup ".join(partes)
 
 # This method generates an additional interpretive text when the number of solutions is high relative to the total size of the space.
 # It is used to warn that, in those cases, Grover's advantage is reduced and the geometric rotation may become less intuitive to observe.
@@ -1006,16 +1015,16 @@ def high_solution_case_explanation(n, solution_indices):
     return None
 
 # This method draws the side panel of the mathematical summary.
-def draw_mathematical_summary(ax_math, datos):
-    ax_math.axis("off")
+def draw_mathematical_summary(ax_panel, data):
+    ax_panel.axis("off")
 
     bg_color = "#f3f3f3"
 
-    caja = FancyBboxPatch(
+    box = FancyBboxPatch(
         (0.0, 0.0),
         1.0,
         1.0,
-        transform=ax_math.transAxes,
+        transform=ax_panel.transAxes,
         boxstyle="round,pad=0.0,rounding_size=0.025",
         facecolor=bg_color,
         edgecolor="#cccccc",
@@ -1023,58 +1032,96 @@ def draw_mathematical_summary(ax_math, datos):
         clip_on=False
     )
 
-    ax_math.add_patch(caja)
+    ax_panel.add_patch(box)
 
-    elementos = []
+    legend = ax_panel.legend(
+        handles=data["handles"],
+        loc="upper left",
+        bbox_to_anchor=(0.035, 0.965, 0.93, 0.0),
+        bbox_transform=ax_panel.transAxes,
+        mode="expand",
+        fontsize=12.2,
+        frameon=False,
+        title="Legend",
+        title_fontsize=14,
+        borderpad=0.0,
+        labelspacing=0.72,
+        handlelength=2.0,
+        handletextpad=0.8,
+        borderaxespad=0.0
+    )
+    legend.get_title().set_fontweight(900)
 
-    for linea in datos["resumen_matematico"]:
-        if len(linea) == 2:
-            texto, tam = linea
+    try:
+        legend._legend_box.align = "left"
+    except Exception:
+        pass
+
+    ax_panel.text(
+        0.05,
+        0.515,
+        "Mathematical summary",
+        transform=ax_panel.transAxes,
+        fontsize=14,
+        fontweight=900,
+        ha="left",
+        va="center",
+        color="black"
+    )
+
+    elements = []
+
+    for line in data["resumen_matematico"]:
+        if len(line) == 2:
+            text, size = line
             indent = 0
         else:
-            texto, tam, indent = linea
+            text, size, indent = line
 
-        if texto == "":
-            elementos.append(
+        if text == "":
+            elements.append(
                 TextArea(
                     " ",
-                    textprops=dict(size=tam)
+                    textprops=dict(size=size)
                 )
             )
         else:
-            espacio = DrawingArea(indent, 1, 0, 0)
+            space = DrawingArea(indent, 1, 0, 0)
 
-            contenido = TextArea(
-                texto,
-                textprops=dict(size=tam)
+            content = TextArea(
+                text,
+                textprops=dict(
+                    size=size,
+                    math_fontfamily="cm"
+                )
             )
 
-            fila = HPacker(
-                children=[espacio, contenido],
+            row = HPacker(
+                children=[space, content],
                 align="baseline",
                 pad=0,
                 sep=0
             )
 
-            elementos.append(fila)
+            elements.append(row)
 
-    bloque = VPacker(
-        children=elementos,
+    block = VPacker(
+        children=elements,
         align="left",
         pad=0,
-        sep=5
+        sep=6
     )
 
-    resumen = AnchoredOffsetbox(
+    summary = AnchoredOffsetbox(
         loc="upper left",
-        child=bloque,
+        child=block,
         frameon=False,
-        bbox_to_anchor=(0.025, 0.965),
-        bbox_transform=ax_math.transAxes,
+        bbox_to_anchor=(0.05, 0.465),
+        bbox_transform=ax_panel.transAxes,
         borderpad=0
     )
 
-    ax_math.add_artist(resumen)
+    ax_panel.add_artist(summary)
 
 # This method organizes the complete step-by-step Grover visualization.
 # Based on the calculated states, it projects each one onto the representation plane and, for each iteration, creates a figure containing:
@@ -1090,8 +1137,6 @@ def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Grover
         return
 
     points = [project_state(s, solution_indices, n) for s in states]
-
-    bg_color = "#f3f3f3"
 
     for iteration_number in range(1, iterations + 1):
         fig = plt.figure(figsize=(16, 9))
@@ -1114,56 +1159,24 @@ def plot_grover_by_iteration(states, labels, n, solution_indices, titulo="Grover
         )
 
         fig.suptitle(
-            titulo,
-            fontsize=28,
-            fontweight="bold",
-            y=0.955
+            "Grover Evolution",
+            fontsize=31,
+            fontweight=900,
+            x=0.49,
+            y=0.905
         )
 
         panel_x = 0.485
-        panel_w = 0.25
+        panel_w = 0.255
+        panel_h = 0.56
+        panel_y = main_top - panel_h
 
-        h_legend = 0.25
-        h_math = 0.31
+        ax_panel = fig.add_axes([panel_x, panel_y, panel_w, panel_h])
+        draw_mathematical_summary(ax_panel, datos)
+
         h_info = 0.12
-
-        gap_legend_math = 0.035
-        gap_math_info = 0.045
-
-        y_legend = main_top - h_legend
-        y_math = y_legend - gap_legend_math - h_math
-        y_info = y_math - gap_math_info - h_info
-
-        ax_leg = fig.add_axes([panel_x, y_legend, panel_w, h_legend])
-        ax_leg.axis("off")
-
-        legend = ax_leg.legend(
-            handles=datos["handles"],
-            loc="upper left",
-            bbox_to_anchor=(0.0, 0.0, 1.0, 1.0),
-            bbox_transform=ax_leg.transAxes,
-            mode="expand",
-            fontsize=11,
-            frameon=True,
-            title="Legend",
-            title_fontsize=14,
-            borderpad=0.9,
-            labelspacing=0.65,
-            handlelength=2.0,
-            handletextpad=0.8,
-            borderaxespad=0.0,
-            facecolor=bg_color,
-            edgecolor="#cccccc",
-            framealpha=1.0
-        )
-
-        try:
-            legend._legend_box.align = "left"
-        except Exception:
-            pass
-
-        ax_math = fig.add_axes([panel_x, y_math, panel_w, h_math])
-        draw_mathematical_summary(ax_math, datos)
+        gap_info = 0.04
+        y_info = panel_y - gap_info - h_info
 
         if datos["explicacion_extra"] is not None:
             ax_info = fig.add_axes([panel_x, y_info, panel_w, h_info])
@@ -1464,13 +1477,14 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
         )
 
     ax.text(
-        0.84, 0.97,
+        0.84,
+        0.97,
         f"Iteration {iteration_number}",
         transform=ax.transAxes,
         ha="center",
         va="top",
         fontsize=20,
-        fontweight="bold",
+        fontweight=900,
         color="black",
         zorder=20
     )
@@ -1536,41 +1550,29 @@ def draw_single_iteration(ax, points, labels, iteration_number, n, solution_indi
     expr_diff = state_expression_latex(x_diff, y_diff)
 
     resumen_matematico = [
-        (rf"$n={n}$", 10.2),
+        (
+            rf"$n = {n}\quad \mathrm{{(number\ of\ qubits)}}$",
+            11.0
+        ),
         ("", 2),
         (
-            r"$|u\rangle=\frac{1}{\sqrt{2^n}}\sum_{x=0}^{2^n-1}|x\rangle$",
-            13.2
-        ),
-        (
-            rf"${expr_start}$",
-            9.4,
-            22
+            r"$|u\rangle = \frac{1}{\sqrt{2^n}}\sum_{x=0}^{2^n-1}|x\rangle$",
+            15.0
         ),
         ("", 3),
         (
-            r"$O_f|x\rangle=(-1)^{f(x)}|x\rangle$",
-            13.2
+            r"$O_f|x\rangle = (-1)^{f(x)}|x\rangle$",
+            15.0
         ),
         (
             "$" + conjunto_soluciones + "$",
-            9.2,
-            22
-        ),
-        (
-            rf"${expr_oracle}$",
-            9.4,
-            22
+            11.0,
+            20
         ),
         ("", 3),
         (
-            r"$D=2|u\rangle\langle u|-I$",
-            13.2
-        ),
-        (
-            rf"${expr_diff}$",
-            9.4,
-            22
+            r"$D = 2|u\rangle\langle u| - I$",
+            15.0
         ),
     ]
 
